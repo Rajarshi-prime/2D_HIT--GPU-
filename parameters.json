@@ -1,0 +1,21 @@
+{
+    "dt": 0.002,
+    "tf": 0.3,
+    "tp": 0.2,
+    "st": 0.1,
+    "T": 40,
+    "savestep": 1,
+    "prtcl_savestep": 0.5,
+    "d": 2,
+    "alph": 1,
+    "N": 1024,
+    "Nprtcl": 0.25,
+    "lp": 1,
+    "nu": 5e-5,
+    "linnu": 0.005,
+    "einit": 5,
+    "kinit": 200,
+    "eta": 1.1,
+    "shell_count": [100,101],
+    "restart": true
+}
