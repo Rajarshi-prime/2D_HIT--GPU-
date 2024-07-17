@@ -7,7 +7,7 @@
     "savestep": 1,
     "prtcl_savestep": 0.5,
     "d": 2,
-    "alph": 1,
+    "alph": 1.0,
     "N": 1024,
     "Nprtcl": 0.25,
     "lp": 1,

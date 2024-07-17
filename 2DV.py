@@ -37,8 +37,8 @@ kinit = params["kinit"] # Initial energy is distributed among these wavenumbers
 linnu = params["linnu"] # Linear drag co-efficient
 lp = params["lp"] # Power of the laplacian in the hyperviscous term
 shell_count = params["shell_count"] # The shells where the energy is injected
-alph = params["alpha"] # The density ratio
-Nprtcl = params["Nprtcl"] # Number of particles
+alph = params["alph"] # The density ratio
+Nprtcl = int(params["Nprtcl"]*Nx*Ny) # Number of particles
 tp = params["tp"] # Time period for the particles
 tf = params["tf"] # Final time for the particles
 st = params["st"] # Save the particle data after this many timesteps
@@ -373,7 +373,7 @@ def evolve_and_save(f,t,x0):
 
 
 ## ---------------- Initial conditions ----------------
-if ~restart:
+if restart == False:
     """Starts on its own"""
     r = np.random.RandomState(309)
     thinit = r.uniform(0,2*np.pi,np.shape(k))
