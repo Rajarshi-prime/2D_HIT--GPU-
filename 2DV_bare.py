@@ -39,8 +39,10 @@ shell_count = params["shell_count"] # The shells where the energy is injected
 
 savestep = int(params["savestep"]/dt) # Save the data after this many timesteps
 eta = params["eta"]/(Nx//3) # Desired Kolmogorov length scale
+kf = params["kf"] # Forcing wavenumber
+f0 = params["f0"] # Forcing amplitude
 t = np.arange(0,1.1*dt + T,dt) # Time array
-P = (nu**3/eta**4)/len(shell_count) # power per unit shell
+P = (2*np.pi)**2*(nu**3/eta**4)/len(shell_count) # power per unit shell
 
 ## ----------------------------------------------- ##
 
@@ -111,27 +113,30 @@ def e2d_to_1d(x):
 ## --------------------------------------------------------------
 
 
-
+f_r = -kf*f0*np.sin(kf*y)
+f = fft.rfft2(f_r)
 def forcing(xi,psi):
-    """
-    Calculates the net dissipation of the flow and injects that amount into larges scales of the horizontal flow
-    """
+    # """
+    # Calculates the net dissipation of the flow and injects that amount into larges scales of the horizontal flow
+    # """
     
-    e_arr[:] = e2d_to_1d(0.5*(xi*np.conjugate(psi))*normalize) #!
-    if np.sum(e_arr)>100: raise ValueError("Blowup")
-    # print("inside",e_arr[shell1])
-    """Change forcing starts here"""
-    ## Const Power Input
-    factor[:] = np.where(ek_arr0 > 0, P/2.,0)*np.where(e_arr<1e-10,1,1/e_arr)
-    factor2d[:] = factor[kint]
-    # Constant shell energy
-    # factor[:] = 0.
-     
-    # factor[shell1] = 1/dt*((ek_arr0[shell1]/max(1e-5,e_arr[shell1]))**0.5-1) #! The factors for each shell is calculated
+    # e_arr[:] = e2d_to_1d(0.5*(xi*np.conjugate(psi))*normalize) #!
+    # if np.sum(e_arr)>100: raise ValueError("Blowup")
+    # # print("inside",e_arr[shell1])
+    # """Change forcing starts here"""
+    # ## Const Power Input
+    # factor[:] = np.where(ek_arr0 > 0, P/2.,0)*np.where(e_arr<1e-10,1,1/e_arr)
     # factor2d[:] = factor[kint]
+    # # Constant shell energy
+    # # factor[:] = 0.
+     
+    # # factor[shell1] = 1/dt*((ek_arr0[shell1]/max(1e-5,e_arr[shell1]))**0.5-1) #! The factors for each shell is calculated
+    # # factor2d[:] = factor[kint]
     
-    return  factor2d*dealias*xi
+    # return  factor2d*dealias*xi
+    return  f
     # return  factor2d*dealias/normalize
+
 
 ## ------------------- RHS w/o viscosity --------------------
 """psi = str fn ; xi = vorticity"""
@@ -174,7 +179,7 @@ def evolve_and_save(f,t,x0):
         if i%savestep ==0:
             psi[:] = -lapinv*x_old
             e_arr[:] = e2d_to_1d(0.5*(x_old*np.conjugate(psi))*normalize)
-            print(f"Energy at time {np.round(t[i],2)} is {np.sum(e_arr):.2f}",end= '\r')
+            print(f"Energy at time {np.round(t[i],2)} is {np.sum(e_arr):.4f}",end= '\r')
             
             ## Saving the vorticity contour
             # np.save(f"data/vorticity {np.round(t[i]/t[-1]*100,2)}%",ifft2(x_old))
@@ -211,21 +216,23 @@ def evolve_and_save(f,t,x0):
 
 
 ## ---------------- Initial conditions ----------------
-r = np.random.RandomState(309)
-thinit = r.uniform(0,2*np.pi,np.shape(k))
-eprofile = np.exp(-np.arange(Nf))
-eprofile[shell_count] = 1e-8
-eprofile[:] = eprofile/np.histogram(k.ravel(),bins = shells)[0]
-
-psi0  = (eprofile[kint])**0.5*np.exp(1j*thinit)*(kint>0)*(kint<kinit)/np.where(kint>0, kint**1,1)
-xi0 = -lap*psi0
+# r = np.random.RandomState(309)
+# thinit = r.uniform(0,2*np.pi,np.shape(k))
+# eprofile = np.exp(-np.arange(Nf)/5)
+# eprofile[shell_count] = 1e-8
+# eprofile[:] = eprofile/np.histogram(k.ravel(),bins = shells)[0]
+# psi0  = (eprofile[kint])**0.5*np.exp(1j*thinit)*(kint>0)*(kint<kinit)/np.where(kint>0, kint**1,1)
+# xi0 = -lap*psi0
+xi0_r = -f0*kf*nu*(np.cos(kf*x) + np.cos(kf*y))
+xi0 = fft.rfft2(xi0_r)
+psi0 = -lapinv*xi0
 e_arr = e2d_to_1d(0.5*(xi0*np.conjugate(psi0))*normalize)
 ek_arr0= 0*e_arr.copy()
 ek_arr0[shell_count] = e_arr[shell_count]
 e0 = np.sum(e_arr)
 
-xi0[:] = xi0*(einit/e0)**0.5
-psi0[:] = psi0*(einit/e0)**0.5
+# xi0[:] = xi0*(einit/e0)**0.5
+# psi0[:] = psi0*(einit/e0)**0.5
 ur[:] = ifft2(1j * ky*psi0)
 vr[:] = ifft2(-1j * kx*psi0) 
 e_arr = e2d_to_1d(0.5*(xi0*np.conjugate(psi0))*normalize)

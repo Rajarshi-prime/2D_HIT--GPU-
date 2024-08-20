@@ -39,13 +39,15 @@ lp = params["lp"] # Power of the laplacian in the hyperviscous term
 shell_count = params["shell_count"] # The shells where the energy is injected
 alph = params["alph"] # The density ratio
 Nprtcl = int(params["Nprtcl"]*Nx*Ny) # Number of particles
-tp = params["tp"] # Time period for the particles
 tf = params["tf"] # Final time for the particles
-st = params["st"] # Save the particle data after this many timesteps
+st = params["st"]*tf # Time period for the particles
+tp = st # Save the particle data after this many timesteps
 savestep = int(params["savestep"]/dt) # Save the data after this many timesteps
 prtcl_savestep = int(params["prtcl_savestep"]/dt) # Save the particle data after this many timesteps
 eta = params["eta"]/(Nx//3) # Desired Kolmogorov length scale
 restart = params["restart"] # Restart from the last saved data
+kf = params["kf"] # Forcing wavenumber
+f0 = params["f0"] # Forcing amplitude
 t = np.arange(0,1.1*dt + T,dt) # Time array
 P = (nu**3/eta**4)/len(shell_count) # power per unit shell
 
@@ -102,11 +104,15 @@ k1 = np.empty((Nx,Ny//2 + 1),dtype = np.complex128)
 k2 = np.empty((Nx,Ny//2 + 1),dtype = np.complex128)
 k3 = np.empty((Nx,Ny//2 + 1),dtype = np.complex128)
 k4 = np.empty((Nx,Ny//2 + 1),dtype = np.complex128)
+tk1 = np.empty((Nx,Ny//2 + 1),dtype = np.complex128)
+tk2 = np.empty((Nx,Ny//2 + 1),dtype = np.complex128)
 
 
 u_field = np.zeros((Nx,Ny,2))
-DuDt = np.zeros((Nx,Ny,2))
+deludelt = np.zeros((Nx,Ny,2))
 A_field = np.zeros((Nx,Ny,2,2))
+delAdelt = np.zeros((Nx,Ny,2,2))
+ugrdA_field = np.zeros((Nx,Ny,2,2))
 xi_xr = np.empty((Nx,Ny),dtype = np.float64)
 xi_yr = np.empty((Nx,Ny),dtype = np.float64)
 advterm = np.empty((Nx,Ny),dtype = np.float64)
@@ -137,8 +143,14 @@ yindex = np.zeros((Nprtcl))
 xrem = np.zeros((Nprtcl))
 yrem = np.zeros((Nprtcl))
 umat = np.zeros((Nprtcl,d))
-DuDtmat = np.zeros((Nprtcl,d))
+deludeltmat = np.zeros((Nprtcl,d))
+ugrdumat = np.zeros((Nprtcl,d))
+DADtmat = np.zeros((Nprtcl,d,d))
 Amat = np.zeros((Nprtcl,d,d))
+term1 = np.zeros((Nx,Ny))
+term2 = np.zeros((Nx,Ny))
+term3 = np.zeros((Nx,Ny))
+term4 = np.zeros((Nx,Ny))
 
 ## --------------------------------------------------------------
 def e2d_to_1d(x):
@@ -146,55 +158,72 @@ def e2d_to_1d(x):
 ## --------------------------------------------------------------
 
 
-
+f_r = f0*np.sin(kf*y)
+f = fft.rfft2(f_r)
 def forcing(xi,psi):
     """
     Calculates the net dissipation of the flow and injects that amount into larges scales of the horizontal flow
     """
     
-    e_arr[:] = e2d_to_1d(0.5*(xi*np.conjugate(psi))*normalize) #!
-    if np.sum(e_arr)>100: raise ValueError("Blowup")
-    # print("inside",e_arr[shell1])
-    """Change forcing starts here"""
-    ## Const Power Input
-    factor[:] = np.where(ek_arr0 > 0, P/2.,0)*np.where(e_arr<1e-10,1,1/e_arr)
-    factor2d[:] = factor[kint]
-    # Constant shell energy
-    # factor[:] = 0.
-     
-    # factor[shell1] = 1/dt*((ek_arr0[shell1]/max(1e-5,e_arr[shell1]))**0.5-1) #! The factors for each shell is calculated
+    # e_arr[:] = e2d_to_1d(0.5*(xi*np.conjugate(psi))*normalize) #!
+    # if np.sum(e_arr)>100: raise ValueError("Blowup")
+    # # print("inside",e_arr[shell1])
+    # """Change forcing starts here"""
+    # ## Const Power Input
+    # factor[:] = np.where(ek_arr0 > 0, P/2.,0)*np.where(e_arr<1e-10,1,1/e_arr)
     # factor2d[:] = factor[kint]
+    # # Constant shell energy
+    # # factor[:] = 0.
+     
+    # # factor[shell1] = 1/dt*((ek_arr0[shell1]/max(1e-5,e_arr[shell1]))**0.5-1) #! The factors for each shell is calculated
+    # # factor2d[:] = factor[kint]
     
-    return  factor2d*dealias*xi
+    # return  factor2d*dealias*xi
+    return  f
     # return  factor2d*dealias/normalize
 
 index = lambda arg,shift: ((arg + shift )%Nx).astype(int) # Calculating the index
 
-def calcA(psi,A_field):
+def calcA(psi,u_field,A_field,ugrdA_field):
     A_field[...,0,0] = -ifft2(kx* ky*psi)
     A_field[...,0,1] = -ifft2(ky* ky*psi)
     A_field[...,1,0] = ifft2(kx* kx*psi)
     A_field[...,1,1] = ifft2(ky* kx*psi)
-    return A_field
+    
+    term1[:] = ifft2(1j*kx**2* ky*psi)
+    term2[:] = ifft2(1j*ky**2* kx*psi)
+    term3[:] = ifft2(1j*kx**3*psi)
+    term4[:] = ifft2(1j*ky**3*psi)
+    
+    ugrdA_field[...,0,0] = ifft2(fft.rfft2(-term1*u_field[...,0 ] - term2*u_field[...,1 ])*dealias)
+    ugrdA_field[...,0,1] = ifft2(fft.rfft2(-term2*u_field[...,0 ] - term4*u_field[...,1 ])*dealias)
+    ugrdA_field[...,1,0] = ifft2(fft.rfft2(term3*u_field[...,0 ] +  term1*u_field[...,1 ])*dealias)
+    ugrdA_field[...,1,1] = ifft2(fft.rfft2(term1*u_field[...,0 ] +  term2*u_field[...,1 ])*dealias)
+    
+    return A_field,ugrdA_field
 
 ## -------------- interpolation of any field ---------------------
-def Linterp(pos,u_field,A_field,DuDt):
+def Linterp(pos,u_field,A_field,deludelt,DADt):
 # pos = np.array([[1,2]])
     xindex[:] = (pos[:,0]//dx)%Nx
     yindex[:] = (pos[:,1]//dy)%Ny
     xrem[:] = pos[:,0]%dx/dx
     yrem[:] = pos[:,1]%dy/dy
 
-
+    idx1 = ((xindex+0)%Nx).astype(int)
+    idx2 = ((xindex+1)%Nx).astype(int)
+    idy1 = ((yindex+0)%Nx).astype(int)
+    idy2 = ((yindex+1)%Nx).astype(int)
     ## Linear interpolation
-    umat[:] = (((1 - xrem) * (1 - yrem))[:,None] *u_field[index(xindex,0 ),index(yindex, 0),...] + ((1 - xrem) * (yrem) )[:,None]*u_field[index(xindex,0 ),index(yindex, 1),...] + ((xrem)*(1-yrem))[:,None]*u_field[index(xindex, 1 ),index(yindex, 0),...]  + ((xrem)*(yrem))[:,None]*u_field[index(xindex, 1 ),index(yindex, 1),...])
+    umat[:] = (((1 - xrem) * (1 - yrem))[:,None] *u_field[idx1,idy1,...] + ((1 - xrem) * (yrem) )[:,None]*u_field[idx1,idy2,...] + ((xrem)*(1-yrem))[:,None]*u_field[idx2,idy1,...]  + ((xrem)*(yrem))[:,None]*u_field[idx2,idy2,...])
     
-    Amat[:] = st*(((1 - xrem) * (1 - yrem))[:,None,None] *A_field[index(xindex,0 ),index(yindex, 0),...] + ((1 - xrem) * (yrem) )[:,None,None]*A_field[index(xindex,0 ),index(yindex, 1),...] + ((xrem)*(1-yrem))[:,None,None]*A_field[index(xindex, 1 ),index(yindex, 0),...]  + ((xrem)*(yrem))[:,None,None]*A_field[index(xindex, 1 ),index(yindex, 1),...])
+    Amat[:] = st*(((1 - xrem) * (1 - yrem))[:,None,None] *A_field[idx1,idy1,...] + ((1 - xrem) * (yrem) )[:,None,None]*A_field[idx1,idy2,...] + ((xrem)*(1-yrem))[:,None,None]*A_field[idx2,idy1,...]  + ((xrem)*(yrem))[:,None,None]*A_field[idx2,idy2,...])
     
-    DuDtmat[:] =  (((1 - xrem) * (1 - yrem))[:,None] *DuDt[index(xindex,0 ),index(yindex, 0),...] + ((1 - xrem) * (yrem) )[:,None]*DuDt[index(xindex,0 ),index(yindex, 1),...] + ((xrem)*(1-yrem))[:,None]*DuDt[index(xindex, 1 ),index(yindex, 0),...]  + ((xrem)*(yrem))[:,None]*DuDt[index(xindex, 1 ),index(yindex, 1),...])
+    deludeltmat[:] =  (((1 - xrem) * (1 - yrem))[:,None] *deludelt[idx1,idy1,...] + ((1 - xrem) * (yrem) )[:,None]*deludelt[idx1,idy2,...] + ((xrem)*(1-yrem))[:,None]*deludelt[idx2,idy1,...]  + ((xrem)*(yrem))[:,None]*deludelt[idx2,idy2,...])
     
+    DADtmat[:] = st*(((1 - xrem) * (1 - yrem))[:,None,None] *DADt[idx1,idy1,...] + ((1 - xrem) * (yrem) )[:,None,None]*DADt[idx1,idy2,...] + ((xrem)*(1-yrem))[:,None,None]*DADt[idx2,idy1,...]  + ((xrem)*(yrem))[:,None,None]*DADt[idx2,idy2,...])
     
-    return umat,Amat,DuDtmat
+    return umat,Amat,deludeltmat,DADtmat
 
 def RHSp(t,pos,umat,DuDtmat):
     yprtcl[:,:d] = pos[:,d:2*d]
@@ -205,8 +234,8 @@ def RHSp(t,pos,umat,DuDtmat):
 
 # def RHSZ(t,Z,A,ugrdA):
 #     return (-alph*(Z - A) - Z@Z + 3*(1 - alph)*A@A)/st + 3*(1 - alph)*ugrdA        
-def RHSZ(t,Z,A):
-    return (-alph*(Z - A) - Z@Z + 3*(1 - alph)*A@A)/st #+ 3*(1 - alph)*ugrdA
+def RHSZ(t,Z,A,DADt):
+    return (-alph*(Z - A) - Z@Z + 3*(1 - alph)*A@A)/st + 3*(1 - alph)*DADt
 ## ------------------- RHS w/o viscosity --------------------
 """psi = str fn ; xi = vorticity"""
 def adv(t,xi,i):
@@ -236,8 +265,7 @@ def evolve_and_save(f,t,x0):
     
     for i,ti in enumerate(t[:-1]):
         # print(np.round(t[i],2),end= '\r')
-        ## Things to do every 1 second (dt = 0.1)
-        A_field[:]  = calcA(psi,A_field)
+        #! Things to do every 1 second (dt = 0.1)
         if i%savestep ==0:
             psi[:] = -lapinv*x_old
             e_arr[:] = e2d_to_1d(0.5*(x_old*np.conjugate(psi))*normalize)
@@ -252,6 +280,8 @@ def evolve_and_save(f,t,x0):
             np.save(savePath/f"e_arr", e_arr)
             
         if i%prtcl_savestep==0:
+            print(f"Max TrZ at time {t[i+1]} : {np.max(np.abs(Z[:,0,0] + Z[:,1,1] ))}")
+            
             # print(np.round(t[i],2),end= '\r')
             
             ## Saving the vorticity contour
@@ -263,68 +293,119 @@ def evolve_and_save(f,t,x0):
             np.save(savePathprtcl/f"vel", xprtcl[:,d:2*d])
             # np.save(savePathprtcl/f"prtcl_A", A_field)
             # TrZ[:] =  np.einsum('...ii->...', Z).ravel()
-            # np.save(savePathprtcl/f"prtcl_Z", Z)
+            np.save(savePathprtcl/f"prtcl_Z", Z)
             # np.save(savePathprtcl/f"prtcl_TrZ", TrZ)
         
         
         k1[:] = adv(ti,x_old,i)
-        DuDt[...,0] = ifft2(-1j*lapinv*ky*(k1 - xivis*(x_old )))
-        DuDt[...,1] = ifft2(1j*lapinv*kx*(k1 - xivis*(x_old )))
+        # psi[:] = fft.rfft2(np.sin(x)*np.sin(y))
+        # u_field[...,0] = ifft2(1j * ky*psi)
+        # u_field[...,1] = ifft2(-1j * kx*psi) 
+        A_field[:],ugrdA_field[:]  = calcA(psi,u_field,A_field,ugrdA_field)
+        tk1[:] = -1j*lapinv*ky*(k1 - xivis*(x_old ))
+        tk2[:] = 1j*lapinv*kx*(k1 - xivis*(x_old ))
+        deludelt[...,0] = ifft2(tk1)
+        deludelt[...,1] = ifft2(tk2)
         
+        delAdelt[...,0,0] = ifft2(1j*kx*tk1)
+        delAdelt[...,0,1] = ifft2(1j*ky*tk1)
+        delAdelt[...,1,0] = ifft2(1j*kx*tk2)
+        delAdelt[...,1,1] = ifft2(1j*ky*tk2)
         
-        umat[:],Amat[:],DuDtmat[:] = Linterp(xprtcl[:,:d],u_field,A_field,DuDt)    
+        umat[:],Amat[:],deludeltmat[:],DADtmat[:] = Linterp(xprtcl[:,:d],u_field,A_field,deludelt,delAdelt+ugrdA_field)    
+        ugrdumat[:] = Amat[...,0]*umat[:,None,0] + Amat[...,1]*umat[:,None,1]
+        # print(f" Max of Tr(A) {np.max(np.abs(Amat[:,0,0] + Amat[:,1,1]))}:")
+        # deludeltmat[:] = k1 
         
         # eiga[i] = eigval(Amat.astype(complex),eiga[i])
         # eigz[i] = eigval(np.nan_to_num(Z[i], posinf = 0.0, neginf=0.0).astype(complex) ,eigz[i])
-        k1p[:] = RHSp(t[i],xprtcl,umat,DuDtmat)
-        # k1Z[:] = RHSZ(t[i],Z,Amat)
+        k1p[:] = RHSp(t[i],xprtcl,umat,deludeltmat + ugrdumat)
+        k1Z[:] = RHSZ(t[i],Z,Amat,DADtmat)
         
         xtemp[:] = (xprtcl+h*k1p/2)
         xtemp[:,:d] = xtemp[:,:d]%Lx
         
         k2[:] = adv(ti + h/2, x_old + h/2*k1,i)
-        A_field[:]  = calcA(psi,A_field)
-        DuDt[...,0] = ifft2(-1j*lapinv*ky*(k2 - xivis*(x_old + h/2*k1)))
-        DuDt[...,1] = ifft2(1j*lapinv*kx*(k2 - xivis*(x_old + h/2*k1)))
+        # psi[:] = fft.rfft2(np.sin(x)*np.sin(y))
+        # u_field[...,0] = ifft2(1j * ky*psi)
+        # u_field[...,1] = ifft2(-1j * kx*psi) 
+        A_field[:],ugrdA_field[:]  = calcA(psi,u_field,A_field,ugrdA_field)
+        tk1[:] = -1j*lapinv*ky*(k2 - xivis*(x_old + h/2*k1))
+        tk2[:] = 1j*lapinv*kx*(k2 - xivis*(x_old + h/2*k1))
+        deludelt[...,0] = ifft2(tk1)
+        deludelt[...,1] = ifft2(tk2)
         
-        umat[:],Amat[:],DuDtmat[:] = Linterp(xtemp[:,:d],u_field,A_field,DuDt)    
-        # DuDtmat[:] = Amat[...,0]*umat[...,0].reshape(Nprtcl,1) + Amat[...,1]*umat[:,1].reshape(Nprtcl,1) 
+        delAdelt[...,0,0] = ifft2(1j*kx*tk1)
+        delAdelt[...,0,1] = ifft2(1j*ky*tk1)
+        delAdelt[...,1,0] = ifft2(1j*kx*tk2)
+        delAdelt[...,1,1] = ifft2(1j*ky*tk2)
         
-        k2p[:] = RHSp(t[i]+h/2,xtemp,umat,DuDtmat)
-        # k2Z[:] = RHSZ(t[i]+ h/2.,Z+ h/2.*k1Z,Amat)
+        umat[:],Amat[:],deludeltmat[:],DADtmat[:] = Linterp(xtemp[:,:d],u_field,A_field,deludelt,delAdelt+ugrdA_field) 
+        ugrdumat[:] = Amat[...,0]*umat[:,None,0] + Amat[...,1]*umat[:,None,1]
+        
+        # print(f" Max of Tr(A) {np.max(np.abs(Amat[:,0,0] + Amat[:,1,1]))}:")
+        k2p[:] = RHSp(t[i]+h/2,xtemp,umat,deludeltmat + ugrdumat)
+        k2Z[:] = RHSZ(t[i]+ h/2.,Z+ h/2.*k1Z,Amat,DADtmat)
 
         xtemp[:] = (xprtcl+h*k2p/2)
         xtemp[:,:d] = xtemp[:,:d]%Lx
         
         k3[:] = adv(ti + h/2, x_old + h/2*k2,i)
-        A_field[:]  = calcA(psi,A_field)
-        DuDt[...,0] = ifft2(-1j*lapinv*ky*(k3 - xivis*(x_old + h/2*k2)))
-        DuDt[...,1] = ifft2(1j*lapinv*kx*(k3 - xivis*(x_old + h/2*k2)))
+        # psi[:] = fft.rfft2(np.sin(x)*np.sin(y))
+        # u_field[...,0] = ifft2(1j * ky*psi)
+        # u_field[...,1] = ifft2(-1j * kx*psi) 
+        A_field[:],ugrdA_field[:]  = calcA(psi,u_field,A_field,ugrdA_field)
         
-        umat[:],Amat[:],DuDtmat[:] = Linterp(xtemp[:,:d],u_field,A_field,DuDt)    
-        # DuDtmat[:] = Amat[...,0]*umat[...,0].reshape(Nprtcl,1) + Amat[...,1]*umat[:,1].reshape(Nprtcl,1) 
+        tk1[:] = -1j*lapinv*ky*(k3 - xivis*(x_old + h/2*k2))
+        tk2[:] = 1j*lapinv*kx*(k3 - xivis*(x_old + h/2*k2))
+        deludelt[...,0] = ifft2(tk1)
+        deludelt[...,1] = ifft2(tk2)
+        
+        delAdelt[...,0,0] = ifft2(1j*kx*tk1)
+        delAdelt[...,0,1] = ifft2(1j*ky*tk1)
+        delAdelt[...,1,0] = ifft2(1j*kx*tk2)
+        delAdelt[...,1,1] = ifft2(1j*ky*tk2)
+        
+        umat[:],Amat[:],deludeltmat[:],DADtmat[:] = Linterp(xtemp[:,:d],u_field,A_field,deludelt,delAdelt+ugrdA_field) 
+        ugrdumat[:] = Amat[...,0]*umat[:,None,0] + Amat[...,1]*umat[:,None,1]  
+        # print(f" Max of Tr(A) {np.max(np.abs(Amat[:,0,0] + Amat[:,1,1]))}:")
+        # deludeltmat[:] = Amat[...,0]*umat[...,0].reshape(Nprtcl,1) + Amat[...,1]*umat[:,1].reshape(Nprtcl,1) 
 
-        k3p[:] = RHSp(t[i]+h/2,xtemp,umat,DuDtmat)
-        # k3Z[:] = RHSZ(t[i]+ h/2.,Z+ h/2.*k2Z,Amat)
+        k3p[:] = RHSp(t[i]+h/2,xtemp,umat,deludeltmat + ugrdumat)
+        k3Z[:] = RHSZ(t[i]+ h/2.,Z+ h/2.*k2Z,Amat,DADtmat)
 
         xtemp[:] = (xprtcl+h*k3p)
         xtemp[:,:d] = xtemp[:,:d]%Lx
         
         k4[:] = adv(ti + h, x_old + h*k3,i)
-        A_field[:]  = calcA(psi,A_field)
-        DuDt[...,0] = ifft2(-1j*lapinv*ky*(k4 - xivis*(x_old + h*k3)))
-        DuDt[...,1] = ifft2(1j*lapinv*kx*(k4 - xivis*(x_old + h*k3)))
+        # psi[:] = fft.rfft2(np.sin(x)*np.sin(y))
+        # u_field[...,0] = ifft2(1j * ky*psi)
+        # u_field[...,1] = ifft2(-1j * kx*psi) 
+        A_field[:],ugrdA_field[:]  = calcA(psi,u_field,A_field,ugrdA_field) 
+        deludelt[...,0] = ifft2(-1j*lapinv*ky*(k4 - xivis*(x_old + h*k3)))
+        deludelt[...,1] = ifft2(1j*lapinv*kx*(k4 - xivis*(x_old + h*k3)))
+        tk1[:] = -1j*lapinv*ky*(k4 - xivis*(x_old + h*k3))
+        tk2[:] = 1j*lapinv*kx*(k4 - xivis*(x_old + h*k3))
+        deludelt[...,0] = ifft2(tk1)
+        deludelt[...,1] = ifft2(tk2)
         
-        umat[:],Amat[:],DuDtmat[:] = Linterp(xtemp[:,:d],u_field,A_field,DuDt)    
-        # DuDtmat[:] = Amat[...,0]*umat[...,0].reshape(Nprtcl,1) + Amat[...,1]*umat[:,1].reshape(Nprtcl,1) 
+        delAdelt[...,0,0] = ifft2(1j*kx*tk1)
+        delAdelt[...,0,1] = ifft2(1j*ky*tk1)
+        delAdelt[...,1,0] = ifft2(1j*kx*tk2)
+        delAdelt[...,1,1] = ifft2(1j*ky*tk2)
+        
+        umat[:],Amat[:],deludeltmat[:],DADtmat[:] = Linterp(xtemp[:,:d],u_field,A_field,deludelt,delAdelt+ugrdA_field) 
+        ugrdumat[:] = Amat[...,0]*umat[:,None,0] + Amat[...,1]*umat[:,None,1]
+        # print(f" Max of Tr(A) {np.max(np.abs(Amat[:,0,0] + Amat[:,1,1]))}:")
+        # deludeltmat[:] = Amat[...,0]*umat[...,0].reshape(Nprtcl,1) + Amat[...,1]*umat[:,1].reshape(Nprtcl,1) 
 
-        k4p[:] = RHSp(t[i]+h,xtemp,umat,DuDtmat)
-        # k4Z[:] = RHSZ(t[i]+ h,Z+ h*k3Z,Amat)
+        k4p[:] = RHSp(t[i]+h,xtemp,umat,deludeltmat + ugrdumat)
+        k4Z[:] = RHSZ(t[i]+ h,Z+ h*k3Z,Amat,DADtmat)
 
         x_new[:] = (x_old + h/6.0*(k1 + 2*k2 + 2*k3 + k4))/(1.0 + h*xivis)
         xprtcl_new[:] = xprtcl + h*(k1p + 2*k2p + 2*k3p + k4p)/6    
         xprtcl_new[:,:d] = xprtcl_new[:,:d]%Lx
-        # Z_new[:] = Z + h/6.*(k1Z+ 2*k2Z + 2*k3Z + k4Z)
+        Z_new[:] = Z + h/6.*(k1Z+ 2*k2Z + 2*k3Z + k4Z)
         # print(f"Max TrZ at time {t[i+1]} : {np.max(np.abs(Z[i+1,:,0,0] + Z[i+1,:,1,1] + Z[i+1,:,2,2]))}")
         # print(f"Max TrZ at time {t[i+1]} : {np.max(np.abs(np.einsum('...ii->...', Z[i+1]).ravel()))}")
         
@@ -337,7 +418,7 @@ def evolve_and_save(f,t,x0):
         x_old[:] = x_new
         psi[:] = -lapinv*x_old      
         xprtcl[:] = xprtcl_new
-        # Z[:] = Z_new
+        Z[:] = Z_new
         
         
     ## Saving the last vorticity        
@@ -392,7 +473,7 @@ if restart == False:
     psi0[:] = psi0*(einit/e0)**0.5
 else:
     """Starts from the last saved data"""
-    loadPath = curr_path/f"data/Re_{np.round(Re,2)},dt_{0.002},N_{Nx}/last/"
+    loadPath = curr_path/f"data/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/last/"
     xi0 = np.load(loadPath/f"w.npy")
     psi0 = -lapinv*xi0
 
@@ -405,10 +486,10 @@ ek_arr0[shell_count] = e_arr[shell_count]
 print(f"Initial energy : {np.sum(e_arr)}")
 u_field[...,0] = ifft2(1j * ky*psi0)
 u_field[...,1] = ifft2(-1j * kx*psi0) 
-A_field[:]  = calcA(psi0,A_field)
-
+A_field[:],ugrdA_field[:]  = calcA(psi0,u_field,A_field,ugrdA_field)
+print(f"max dt allowed :{dx/np.max(np.abs(u_field))}")
 xprtcl[:,:d] = np.random.uniform(0,Lx,(Nprtcl,d))
-umat[:],Amat[:],DuDtmat[:] = Linterp(xtemp[:,:d],u_field,A_field,DuDt)    
+umat[:],Amat[:],deludeltmat[:],DADtmat[:] = Linterp(xtemp[:,:d],u_field,A_field,deludelt,delAdelt+ugrdA_field) 
 xprtcl[:,d:2*d] = umat
 Z[:] = Amat
 
