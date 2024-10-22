@@ -1,23 +1,25 @@
 import numpy as np
-import os,json,pathlib,sys
-from matplotlib import pyplot as plt
+import matplotlib.pyplot as plt
+import pathlib,sys,os,json
+from scipy.fft import rfft2,irfft2
+from matplotlib.colors import TwoSlopeNorm
 import matplotlib as mpl
-mpl.rc('text', usetex = True)
-plt.rcParams.update({
-    'text.usetex': True,
-    'text.latex.preamble': r'\usepackage{amsfonts}'})
+mpl.rc("text", usetex = True)
+import h5py
+
 
 ## ---------------- params ----------------------- ## 
 paramfile = 'parameters.json'
 with open(paramfile,'r') as jsonFile: params = json.load(jsonFile)
-
+PI = np.pi
+TWO_PI = 2*PI
 d = params["d"] # Dimension
 nu =params["nu"] # Viscosity
 Re = 1/nu if nu > 0 else np.inf # Reynolds number
 N = Nx = Ny = params["N"] # Grid size
 dt = params["dt"] # Timestep
 # T = params["T"] # Final time
-T = 52 # Final time
+T = 440 # Final time
 einit = params["einit"] # Initial energy
 kinit = params["kinit"] # Initial energy is distributed among these wavenumbers
 linnu = params["linnu"] # Linear drag co-efficient
@@ -34,19 +36,83 @@ eta = params["eta"]/(Nx//3) # Desired Kolmogorov length scale
 restart = params["restart"] # Restart from the last saved data
 kf = params["kf"] # Forcing wavenumber
 f0 = params["f0"] # Forcing amplitude
+order = params["order"] # Order of the spline interpolation
 t = np.arange(0,1.1*dt + T,dt) # Time array
 P = (nu**3/eta**4)/len(shell_count) # power per unit shell
+print(f"Number of particles: {Nprtcl}")
+## ----------------------------------------------- ##
 
+print(f"alpha {alph}")
+
+## ---------- Grid and wavenumbers --------------- ##
+Lx, Ly = (2*np.pi),(2*np.pi) #Length of the grid
+X,Y = np.linspace(0,Lx,Nx,endpoint= False), np.linspace(0,Ly,Ny,endpoint= False)
+dx = X[1] - X[0]
+dy = Y[1] - Y[0]
+x,y = np.meshgrid(X,Y,indexing="ij")
+PI = np.pi
+TWO_PI = 2*PI
+
+## It is best to define the function which returns the real part of the iifted function as ifft. 
+ifft2 = lambda x: irfft2(x,(Nx,Ny))
+
+## Forming the 2D grid (k space)
+Kx = 2*np.pi*np.linspace(-(Nx//2) , Nx//2 - 0.5*(1+ (-1)**(Nx%2)),Nx)/Lx
+Ky = 2*np.pi*np.linspace(-(Ny//2) , Ny//2 - 0.5*(1+ (-1)**(Ny%2)),Ny)/Ly
+Kx = np.append(Kx[Kx>=0], Kx[Kx<0])
+Ky = np.append(Ky[Ky>=0], -Ky[0])
+kx,ky = np.meshgrid(Kx,Ky,indexing="ij")
+## Defining the inverese laplacian.
+lap = -(kx**2 + ky**2)
+# lap1 = lap.copy()
+# lap1[lap1== 0] = np.inf
+lapinv = 1.0/np.where(lap == 0., np.inf, lap)
+kx.shape
 ## ----------------------------------------------- ##
 
 
-d# %%
+# %%
 def find_range(x,idx): return np.sum(np.cumsum(x[:idx][::-1]) == range(1,len(x[:idx])+1))+np.sum(np.cumsum(x[idx:])== range(1,len(x[idx:])+1))
+
+Mmat = np.array([
+    [0,-7/15,4/5,-1/3],
+    [1,-1/5,-9/5,1],
+    [0,4/5,6/5,-1],
+    [0,-2/15,-1/5,1/3]    
+]) # The matrix for the spline interpolation
+idx = np.zeros((Nprtcl,d),dtype = int)
+delx = np.zeros((Nprtcl,d),dtype = np.float64)
+poly = np.zeros((Nprtcl,order,d),dtype = np.float64)
+Lx = Ly = TWO_PI
+X,Y = np.linspace(0,Lx,Nx,endpoint= False), np.linspace(0,Ly,Ny,endpoint= False)
+dx = X[1] - X[0]
+dy = Y[1] - Y[0]
+def interp_spline(pos,s_field,smat):
+    smat[:] = 0.0
+    idx = np.zeros(pos.shape,dtype = int)
+    delx = np.zeros(pos.shape,dtype = float)
+    poly = np.zeros((pos.shape[0],order,d),dtype = float)
+    
+    idx[:] = (pos/dx).astype(int)
+    delx[:] = (pos%TWO_PI - X[idx%N])/dx
+    # print(smat.shape,poly.shape,delx.shape)
+    for i in range(order): 
+        poly[:,i] = delx**i
+    for i in range(order):
+        for j in range(order):
+            # temparr[:] = u_field[((idx[:,0]-1 + i)%N),((idx[:,1]-1 + j)%N),...] #! Not giving for saving memories and variables
+            # print(s_field[((idx[:,0]-1 + i)%N),((idx[:,1]-1 + j)%N),...].shape)
+            # print(s_field[((idx[:,0]-1 + i)%N),((idx[:,1]-1 + j)%N),...].shape, "hello")
+            smat  += s_field[((idx[:,0]-1 + i)%N),((idx[:,1]-1 + j)%N),...]*np.einsum('p,q,...p,...q->...',Mmat[i],Mmat[j],poly[...,0],poly[...,1])
+            
+            
+    return smat
 # %%
 curr_path = pathlib.Path(__file__).parent 
 savePlot = pathlib.Path(f"/home/rajarshi.chattopadhyay/fluid/2DV_and_particles/Plots/Re_{np.round(Re,2)},dt_{dt},N_{N}/")
 savePlot.mkdir(parents=True, exist_ok=True)
-loadPath = pathlib.Path(f"/home/rajarshi.chattopadhyay/fluid/2DV_and_particles/data/Re_{np.round(Re,2)},dt_{dt},N_{N}/")
+loadPath = pathlib.Path(f"data/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/")
+prtcl_loadPath = loadPath/f"alpha_{alph:.2}_prtcl/St_{st}/"
 loadPath.exists()
 # loadPath = pathlib.Path(f"/mnt/pfs/rajarshi.chattopadhyay/Caustics3D/data_new/fluid/omg/alph_0.7000/st_0.00848/dt_8.48e-06")
 try: savePlot.mkdir(parents=True, exist_ok=False)
@@ -57,7 +123,7 @@ except FileExistsError: pass
 
 os.listdir(loadPath)
 
-times = np.arange(0,T+ 0.1,params["prtcl_savestep"])
+times = np.arange(0,T+ 0.1,params["savestep"])
 
 #! Goal -- load files one by one, extract caustics and non-caustics particles.
 """Check and store statistics. And be done with it
@@ -70,7 +136,20 @@ The time of caustics
 print(times[-1],st,str(savePlot))
 Ntimes = len(times)
 TrZ = np.zeros((Ntimes, Nprtcl))
-# vel = np.zeros((Ntimes, Nprtcl,d))
+caus_count = np.zeros((Ntimes, Nprtcl))
+vel = np.zeros((Ntimes, Nprtcl,d))
+pos = np.zeros((Ntimes, Nprtcl,d))
+Qmean = np.zeros((Ntimes))
+Qstd = np.zeros((Ntimes))
+Qinterp = np.zeros((Ntimes, Nprtcl))
+causQmean = np.zeros(Ntimes)
+causQstd = np.zeros(Ntimes)
+Qmax = 0.5
+Qmin = -0.5
+Qbins = np.linspace(Qmin,Qmax, 601)
+Q_field_pdf = np.zeros((Ntimes,len(Qbins)-1))
+Q_particle_pdf = np.zeros((Ntimes,len(Qbins)-1))
+Q_caus_pdf = np.zeros((Ntimes,len(Qbins)-1))
 # eiga = np.zeros((Ntimes, Nprtcl,3)).astype(complex)
 # eigz = np.zeros((Ntimes, Nprtcl,3)).astype(complex)
 # causeiga = []
@@ -90,9 +169,53 @@ TrZ = np.zeros((Ntimes, Nprtcl))
 # initQ = np.zeros((Nprtcl))
 # initR = np.zeros((Nprtcl))
 for i,t in enumerate(times):
-    print(f"loading time {i}",end='\r')
-    TrZ[i] = np.einsum('...ii->...', np.load(loadPath/f"alpha_{alph:.2}_prtcl/time_{t:.2f}/prtcl_Z.npy"))
-    # vel[i] = np.load(loadPath/f"alpha_{alph:.2}_prtcl/time_{t:.2f}/vel.npy")
+    print(f"loading time {t}",end='\r')
+    TrZ[i] = np.einsum('...ii->...', np.load(prtcl_loadPath/f"time_{t:.2f}/prtcl_Z.npy"))
+    caus_count[i] =  np.load(prtcl_loadPath/f"time_{t:.2f}/caus_count.npy")
+    vel[i] = np.load(prtcl_loadPath/f"time_{t:.2f}/vel.npy")
+    pos[i] = np.load(prtcl_loadPath/f"time_{t:.2f}/pos.npy")
+    
+    xi = np.load(loadPath/f"time_{t:.2f}/w.npy")
+    xi_r = ifft2(xi)
+    # print(xi_r.max(),np.sqrt(np.mean(xi_r**2)))
+    u = 1j* ky*lapinv*xi
+    v = -1j*kx*lapinv*xi
+    # ur = ifft2(u) 
+    # vr = ifft2(v)
+    A = np.zeros((d,d,Nx,Ny//2+1),dtype = np.complex128)
+    A[0,0] = 1j*kx*u
+    A[0,1] = 1j*ky*u
+    A[1,0] = 1j*kx*v
+    A[1,1] = 1j*ky*v
+    Ar = np.zeros((d,d,Nx,Ny),dtype = np.float64)
+    # Q_field = 0.0
+    for ii in range(d):
+        for jj in range(d):
+            Ar[ii,jj] = ifft2(A[ii,jj])
+
+    Q_field = -0.5*st*np.einsum('ij...,ji...->...',Ar,Ar)
+    Q_field_pdf[i,:]  = np.histogram(Q_field.ravel(),bins = Qbins)[0]/(Nx*Ny)
+    # print(Q_field.shape)
+    # print(np.max(Q_field),np.min(Q_field),np.mean(Q_field))
+    # pos_test = np.array([(x.ravel())[::2],(y.ravel())[::2]]).T + np.random.random((Nx*Ny//2,2))*dx*0.1
+    # Qinterp_test = np.zeros(pos_test.shape[0])
+    # Qinterp_test[:] = interp_spline(pos_test,Q_field,Qinterp_test)
+    # print(np.min(Qinterp_test),np.mean(Qinterp_test),np.max(Qinterp_test))
+    Qinterp[i,:] = interp_spline(pos[i],Q_field,Qinterp[i,:]) 
+    Q_particle_pdf[i,:] = np.histogram(Qinterp[i,:],bins = Qbins)[0]/Nprtcl
+    print(np.min(Qinterp[i,:]),np.mean(Qinterp[i,:]),np.max(Qinterp[i,:]))
+    print(i)
+    causidx = np.argwhere(caus_count[i] > 0)
+    if caus_count[i].any() > 0:
+        causQmean[i] = np.mean(Qinterp[i,causidx])
+        causQstd[i] = np.std(Qinterp[i,causidx])
+        print(np.sum(caus_count[i] > 0),Qinterp[i,causidx].shape)
+        Q_caus_pdf[i,:] = np.histogram(Qinterp[i,causidx],bins = Qbins)[0]/np.sum(caus_count[i] > 0)
+    # Omean[i] = np.mean(Qinterp)
+    # Qstd[i] = np.std(Qinterp)
+# print(Qinterp)
+    
+    
     # eiga[:] = np.load(loadPath/f"eiga_{i+1+exception}.npy")
     # eigz[:] = np.load(loadPath/f"eigz_{i+1+exception}.npy")
     # initQ[i*Nprtcl:(i+1)*Nprtcl] = -0.5*np.sum(eiga[0,:]**2,axis =1).real
@@ -111,7 +234,7 @@ for i,t in enumerate(times):
 #     causvel = causvel + list(np.moveaxis(vel[:,prtcls],0,1))
 #     ## ------------------------------------------------------ ## 
     
-# #     ## ------- distribution for non-caustics particles ------ ##
+# #     ## ------- distribution for non-caustpythoics particles ------ ##
 # #     Q_s1 = -0.5*np.sum(eiga[:,~prtcls]**2, axis = 2).real
 # #     R_s1 = -1/3*np.sum(eiga[:,~prtcls]**3, axis = 2).real
 # #     t_s1 = times[:,None]*np.ones_like(Q_s1)
@@ -124,14 +247,57 @@ for i,t in enumerate(times):
 # # np.save(loadPath/f"Rpdf_non_caustic.npy",Rpdf/(batches*Nprtcl-causno))
 # # del Qpdf,Rpdf,Q_s1,R_s1,t_s1
 # raise SystemExit
-causidx = np.isnan(TrZ).any(axis = 0)
-print(causidx,causidx.sum())
-causTrZ = TrZ[:,causidx]
+
+print(caus_count.shape)
+print(f"fraction of caustics: {np.sum(caus_count,axis = 1)/Nprtcl} at stokes number {st/tf}")
+# if (prtcl_loadPath/f"caus-details.hdf5").exists():
+#     os.remove(prtcl_loadPath/f"caus-details.hdf5")
+with h5py.File(prtcl_loadPath/f"caus-details.hdf5",'w') as f:
+    # try:
+    caus_ratio = f.create_dataset("Caustics_ratio",data = (np.sum(caus_count>0,axis = 1)/Nprtcl),dtype = np.float64)
+    times = f.create_dataset("times",data = times,dtype = np.float64)
+    caus_new = np.sum(caus_count>0,axis = 1)/Nprtcl -np.roll(np.sum(caus_count>0,axis = 1)/Nprtcl ,1)
+    caus_new[0] = 0
+    newcaus = f.create_dataset("new_caus",data =  caus_new,dtype = np.float64)
+    caus_same = np.sum((caus_count >1)*(caus_count > np.roll(caus_count,1,axis = 0)),axis = 1)/Nprtcl
+    caus_same[0] = 0
+    samecaus = f.create_dataset("same_caus",data = caus_same,dtype = np.float64)
+    
+    meanQ = np.mean(Qinterp,axis = 1)
+    print(meanQ)
+    stdQ = np.std(Qinterp,axis = 1)
+    print(np.min(stdQ),np.max(stdQ))
+    Qmean = f.create_dataset("Qmean",data = meanQ,dtype = np.float64)
+    Qstd = f.create_dataset("Qstd",data = stdQ,dtype = np.float64)
+
+    causQmean = f.create_dataset("causQmean",data = causQmean,dtype = np.float64)
+    causQstd = f.create_dataset("causQstd",data = causQstd,dtype = np.float64)
+    
+    Q_field_pdf = f.create_dataset("Q_field_pdf",data = Q_field_pdf,dtype = np.float64)
+    Q_particle_pdf = f.create_dataset("Q_particle_pdf",data = Q_particle_pdf,dtype = np.float64)
+    Q_caus_pdf = f.create_dataset("Q_caus_pdf",data = Q_caus_pdf,dtype = np.float64)
+    print(f"Saved the data in {str(prtcl_loadPath)}")
+    # except ValueError:
+    #     f['Caustics_ratio'] = np.sum(caus_count>0,axis = 1)/Nprtcl
+    #     f['times'] = times
+    #     caus_new = np.sum(caus_count>0,axis = 1)/Nprtcl -np.roll(np.sum(caus_count>0,axis = 1)/Nprtcl ,1)
+    #     caus_new[0] = 0
+    #     f['new_caus'] = caus_new
+    #     caus_same = np.sum((caus_count >1)*(caus_count > np.roll(caus_count,1,axis = 0)),axis = 1)/Nprtcl
+    #     caus_same[0] = 0
+    #     f['same_caus'] = caus_same
+    #     meanQ = np.mean(Qinterp,axis = 1)
+    #     stdQ = np.std(Qinterp,axis = 1)
+    #     f['Qmean'] = meanQ
+    #     f['Qstd'] = stdQ
+# causidx = np.isnan(TrZ).any(axis = 0)
+# print(causidx,causidx.sum())
+# causTrZ = TrZ[:,causidx]
 # causvel = vel[:,causidx]
-causidx = np.argmax(np.isnan(causTrZ),axis = 0) - 1
-print(causidx.shape)
-caustimes = times[causidx]
-print(caustimes,caustimes.max())
+# causidx = np.argmax(np.isnan(causTrZ),axis = 0) - 1
+# print(causidx.shape)
+# caustimes = times[causidx]
+# print(caustimes,caustimes.max())
 # causTrZ = np.moveaxis(np.array(causTrZ),0,1) #Moving the axis back : axis 0 is time. 
 # # causeigz = np.moveaxis(np.array(causeigz),0,1)
 

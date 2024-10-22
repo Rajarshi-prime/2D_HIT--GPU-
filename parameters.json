@@ -1,22 +1,27 @@
 {
     "dt": 0.01,
     "tf": 3.0,
-    "st": 0.6,
-    "T": 500 ,
-    "savestep": 1,
-    "prtcl_savestep": 1,
+    "st": 0.3,
+    "T": 500,
+    "savestep": 0.1,
+    "prtcl_savestep": 0.1,
     "d": 2,
-    "alph": 0.7,
+    "alph": 1.0,
     "N": 1024,
-    "Nprtcl": 0.25,
+    "Nprtcl": 0.3,
     "lp": 1,
-    "nu": 1e-5,
-    "linnu": 1e-2,
-    "einit":  0.001,
+    "nu": 1e-05,
+    "linnu": 0.01,
+    "einit": 0.001,
     "kinit": 100,
     "eta": 1.1,
-    "shell_count": [2,3],
+    "shell_count": [
+        2,
+        3
+    ],
     "restart": true,
     "kf": 4,
-    "f0": 5e-3
+    "f0": 0.005,
+    "order": 4,
+    "Zthresh": -50.0
 }

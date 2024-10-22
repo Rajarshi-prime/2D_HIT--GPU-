@@ -145,7 +145,6 @@ def adv(t,xi,i):
     psi[:] = -lapinv*xi*dealias
     e_arr[:] = e2d_to_1d(0.5*(xi*np.conjugate(psi))*normalize) #!
     if np.sum(e_arr)>100: raise ValueError("Blowup")
-    # print(f"energy = {np.sum(e_arr)}")
     ur[:] = ifft2(1j * ky*psi)
     vr[:] = ifft2(-1j * kx*psi) 
     xi_xr[:] = ifft2(1j * kx*xi)
@@ -155,8 +154,10 @@ def adv(t,xi,i):
 
 
 
+
 ## ----------------------------------------------------------
-    
+
+print(np.max(np.abs(xivis)))
 
 ## -------------The RK4 integration function -----------------
 def evolve_and_save(f,t,x0):
@@ -169,7 +170,9 @@ def evolve_and_save(f,t,x0):
         # print(np.round(t[i],2),end= '\r')
         
         
+        # print(np.abs(x_old).max())
         k1[:] = adv(ti,x_old,i)
+        # print(np.max(np.abs(k1)))
         k2[:] = adv(ti + h/2, x_old + h/2*k1,i)
         k3[:] = adv(ti + h/2, x_old + h/2*k2,i)
         k4[:] = adv(ti + h, x_old + h*k3,i)
@@ -236,13 +239,14 @@ e0 = np.sum(e_arr)
 ur[:] = ifft2(1j * ky*psi0)
 vr[:] = ifft2(-1j * kx*psi0) 
 e_arr = e2d_to_1d(0.5*(xi0*np.conjugate(psi0))*normalize)
-print(f"Initial energy : {np.sum(e_arr)},(dx/u_max) : {((Lx/Nx)/np.max((ur**2 + vr**2)**0.5)):.4f}")
+print(f"Initial energy : {np.sum(e_arr)},(dx/u_max) : {(dx/np.max(np.abs(np.array([ur,vr])))):.4f}")
 ## ----------------------------------------------------
 
 
 
 
 t1 = time()
+print(f"Initial zeta:{np.max(np.abs(xi0))}")
 etot = evolve_and_save(adv,t,xi0)
 t2 = time()
 print(f"Time taken to evolve for {T} secs in {dt} sec timesteps with gridsize {Nx}x{Nx} is \n {t2-t1} sec")
