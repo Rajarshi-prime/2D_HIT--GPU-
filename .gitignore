@@ -1,8 +1,13 @@
-*data/*
+*data*/*
 *.npy
 *.out
 *.npz 
+*.hdf5
 2D_trc.py
 2DV_more_acc.py
 Plots/*
 *.pstats
+running-iteratively-over-alpha.py
+test.py
+renaming_to_npz.py
+renaming_to_npz.ipynb

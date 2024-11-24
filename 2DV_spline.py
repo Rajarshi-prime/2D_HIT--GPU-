@@ -40,8 +40,8 @@ shell_count = params["shell_count"] # The shells where the energy is injected
 alph = params["alph"] # The density ratio
 Nprtcl = int(params["Nprtcl"]*Nx*Ny) # Number of particles
 tf = params["tf"] # Final time for the particles
-st = params["st"]*tf # Time period for the particles
-tp = st # Save the particle data after this many timesteps
+st = params["st"]*tf # Time period for the particles #! Stokes number when non-dimensionalize by simulation time.
+tp = st # Save the particle data after this many timesteps #!(in simulation time dimension, this is the tp)
 savestep = int(params["savestep"]/dt) # Save the data after this many timesteps
 prtcl_savestep = int(params["prtcl_savestep"]/dt) # Save the particle data after this many timesteps
 eta = params["eta"]/(Nx//3) # Desired Kolmogorov length scale
@@ -52,7 +52,7 @@ order = params["order"] # Order of the spline interpolation
 Zthresh = params["Zthresh"] # Threshold for the Z matrix
 t = np.arange(0,1.1*dt + T,dt) # Time array
 P = (nu**3/eta**4)/len(shell_count) # power per unit shell
-
+iname = "spline" if order == 4 else "linear"
 ## ----------------------------------------------- ##
 
 ## ------------ Grid and related operators ------------
@@ -173,22 +173,20 @@ def field_save(i,x_old):
     psi[:] = -lapinv*x_old
     e_arr[:] = e2d_to_1d(0.5*(x_old*np.conjugate(psi))*normalize)
     print(f"Energy at time {np.round(t[i],2)} is {np.sum(e_arr):.4f}",end= '\r')
-    iname = "spline" if order == 4 else "linear"
     savePath = curr_path/f"data_{iname}/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/time_{t[i]:.2f}/"
     savePath.mkdir(parents=True, exist_ok=True)
-    np.save(savePath/f"w", x_old)
-    np.save(savePath/f"e_arr", e_arr)
+    np.savez_compressed(savePath/f"w.npz", vorticity =  x_old)
+    np.savez_compressed(savePath/f"e_arr.npz", energy =  e_arr)
     
 def particle_save(i, xprtcl,Z,caus_count):
     
     print(f"Saving at time {t[i+1]} with Max TrZ : {np.max(np.abs(Z[:,0,0] + Z[:,1,1] ))}")
-    iname = "spline" if order == 4 else "linear"
-    savePathprtcl = curr_path/f"data_{iname}/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/alpha_{alph:.2}_prtcl/St_{st}/time_{t[i]:.2f}"
+    savePathprtcl = curr_path/f"data_{iname}/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/alpha_{alph:.2}_prtcl/St_{st/tf:.2f}/time_{t[i]:.2f}"
     savePathprtcl.mkdir(parents=True, exist_ok=True)
-    np.save(savePathprtcl/f"pos", xprtcl[:,:d])
-    np.save(savePathprtcl/f"vel", xprtcl[:,d:2*d])
-    np.save(savePathprtcl/f"prtcl_Z", Z)
-    np.save(savePathprtcl/f"caus_count", caus_count)
+    np.savez_compressed(savePathprtcl/f"pos.npz",pos =  xprtcl[:,:d])
+    np.savez_compressed(savePathprtcl/f"vel.npz",vel =  xprtcl[:,d:2*d])
+    np.savez_compressed(savePathprtcl/f"prtcl_Z.npz", Zmatrix=  Z)
+    np.savez_compressed(savePathprtcl/f"caus_count.npz", caustics_count =  caus_count)
 ## --------------------------------------------------------------
 
 
@@ -342,7 +340,7 @@ def evolve_and_save(f,t,x0):
         #! Things to do every 1 second (dt = 0.1)
         if i%savestep ==0: field_save(i,x_old)
                     
-        if i%prtcl_savestep ==0: particle_save(i,xprtcl,Z,caus_count)
+        if i%prtcl_savestep == 0: particle_save(i,xprtcl,Z,caus_count)
             
             
 
@@ -366,7 +364,7 @@ def evolve_and_save(f,t,x0):
         # eigz[i] = eigval(np.nan_to_num(Z[i], posinf = 0.0, neginf=0.0).astype(complex) ,eigz[i])
         
         k1p[:] = RHSp(t[i],xprtcl,umat,deludeltmat + ugrdumat)
-        k1Z[:] = RHSZ(t[i],Z,Amat,DADtmat)
+        k1Z[:] = RHSZ(t[i],Z,Amat*tp,DADtmat*tp) #! Making the fluid gradient quantities non-dimensional in simulation time.
         
         xtemp[:] = (xprtcl+h*k1p/2)
         xtemp[:,:d] = xtemp[:,:d]%Lx
@@ -387,7 +385,7 @@ def evolve_and_save(f,t,x0):
         ugrdumat[:] = Amat[...,0]*umat[:,None,0] + Amat[...,1]*umat[:,None,1]
         
         k2p[:] = RHSp(t[i]+h/2,xtemp,umat,deludeltmat + ugrdumat)
-        k2Z[:] = RHSZ(t[i]+ h/2.,Z+ h/2.*k1Z,Amat,DADtmat)
+        k2Z[:] = RHSZ(t[i]+ h/2.,Z+ h/2.*k1Z,Amat*tp,DADtmat*tp) #! Making the fluid gradient quantities non-dimensional in simulation time.
 
         xtemp[:] = (xprtcl+h*k2p/2)
         xtemp[:,:d] = xtemp[:,:d]%Lx
@@ -409,7 +407,7 @@ def evolve_and_save(f,t,x0):
         ugrdumat[:] = Amat[...,0]*umat[:,None,0] + Amat[...,1]*umat[:,None,1]  
 
         k3p[:] = RHSp(t[i]+h/2,xtemp,umat,deludeltmat + ugrdumat)
-        k3Z[:] = RHSZ(t[i]+ h/2.,Z+ h/2.*k2Z,Amat,DADtmat)
+        k3Z[:] = RHSZ(t[i]+ h/2.,Z+ h/2.*k2Z,Amat*tp,DADtmat*tp) #! Making the fluid gradient quantities non-dimensional in simulation time.
 
         xtemp[:] = (xprtcl+h*k3p)
         xtemp[:,:d] = xtemp[:,:d]%Lx
@@ -430,7 +428,7 @@ def evolve_and_save(f,t,x0):
         ugrdumat[:] = Amat[...,0]*umat[:,None,0] + Amat[...,1]*umat[:,None,1]
 
         k4p[:] = RHSp(t[i]+h,xtemp,umat,deludeltmat + ugrdumat)
-        k4Z[:] = RHSZ(t[i]+ h,Z+ h*k3Z,Amat,DADtmat)
+        k4Z[:] = RHSZ(t[i]+ h,Z+ h*k3Z,Amat*tp,DADtmat*tp) #! Making the fluid gradient quantities non-dimensional in simulation time.
 
         x_new[:] = (x_old + h/6.0*(k1 + 2*k2 + 2*k3 + k4))/(1.0 + h*xivis)
         xprtcl_new[:] = xprtcl + h*(k1p + 2*k2p + 2*k3p + k4p)/6    
@@ -489,7 +487,7 @@ if restart == False:
     psi0[:] = psi0*(einit/e0)**0.5
 else:
     """Starts from the last saved data"""
-    loadPath = curr_path/f"data/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/last/"
+    loadPath = curr_path/f"data_{iname}/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/last/"
     xi0 = np.load(loadPath/f"w.npy")
     psi0 = -lapinv*xi0
 
@@ -505,7 +503,7 @@ print(f"max dt allowed :{dx/np.max(np.abs(u_field))}")
 xprtcl[:,:d] = np.random.uniform(0,Lx,(Nprtcl,d))
 umat[:],Amat[:],deludeltmat[:],DADtmat[:] = interp_spline(xtemp[:,:d],u_field,A_field,deludelt,delAdelt+ugrdA_field) 
 xprtcl[:,d:2*d] = umat
-Z[:] = Amat
+Z[:] = Amat*tp
 
 ## ----------------------------------------------------
 
@@ -519,7 +517,7 @@ t2 = time()
 print(f"Time taken to evolve for {T} secs in {dt} sec timesteps with gridsize {Nx}x{Nx} is \n {t2-t1} sec")
 
 # Saving a copy of the params along with the data
-with open(curr_path/f"data/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/parameters.json","w") as jsonFile: json.dump(params, jsonFile,indent = 2)
+with open(curr_path/f"data_{iname}/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/parameters.json","w") as jsonFile: json.dump(params, jsonFile,indent = 2)
 
 """
 Run with something like:

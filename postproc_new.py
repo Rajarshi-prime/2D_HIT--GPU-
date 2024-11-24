@@ -1,4 +1,5 @@
 import numpy as np
+from numba import njit
 import matplotlib.pyplot as plt
 import pathlib,sys,os,json
 from scipy.fft import rfft2,irfft2
@@ -19,12 +20,14 @@ Re = 1/nu if nu > 0 else np.inf # Reynolds number
 N = Nx = Ny = params["N"] # Grid size
 dt = params["dt"] # Timestep
 # T = params["T"] # Final time
-T = 100 # Final time
+T = 20.0# Final time
 einit = params["einit"] # Initial energy
 kinit = params["kinit"] # Initial energy is distributed among these wavenumbers
 linnu = params["linnu"] # Linear drag co-efficient
 lp = params["lp"] # Power of the laplacian in the hyperviscous term
 shell_count = params["shell_count"] # The shells where the energy is injected
+alph = 1.0 # The density ratio
+# alph = params["alph"] # The density ratio
 alph = params["alph"] # The density ratio
 Nprtcl = int(params["Nprtcl"]*Nx*Ny) # Number of particles
 tf = params["tf"] # Final time for the particles
@@ -113,7 +116,7 @@ iname = "spline" if order == 4 else "linear"
 savePlot = pathlib.Path(f"/home/rajarshi.chattopadhyay/fluid/2DV_and_particles/Plots/iname/Re_{np.round(Re,2)},dt_{dt},N_{N}/")
 savePlot.mkdir(parents=True, exist_ok=True)
 loadPath = pathlib.Path(f"data_{iname}/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/")
-prtcl_loadPath = loadPath/f"alpha_{alph:.2}_prtcl/St_{st}/"
+prtcl_loadPath = loadPath/f"alpha_{alph:.2}_prtcl/St_{st/tf:.2f}/"
 loadPath.exists()
 # loadPath = pathlib.Path(f"/mnt/pfs/rajarshi.chattopadhyay/Caustics3D/data_new/fluid/omg/alph_0.7000/st_0.00848/dt_8.48e-06")
 try: savePlot.mkdir(parents=True, exist_ok=False)
@@ -143,6 +146,8 @@ pos = np.zeros((Ntimes, Nprtcl,d))
 Qmean = np.zeros((Ntimes))
 Qstd = np.zeros((Ntimes))
 Qinterp = np.zeros((Ntimes, Nprtcl))
+siginterp = np.zeros((Ntimes, Nprtcl))
+xiinterp = np.zeros((Ntimes, Nprtcl))
 causQmean = np.zeros(Ntimes)
 causQstd = np.zeros(Ntimes)
 Qmax = 0.5
@@ -151,6 +156,14 @@ Qbins = np.linspace(Qmin,Qmax, 6001)
 Q_field_pdf = np.zeros((Ntimes,len(Qbins)-1))
 Q_particle_pdf = np.zeros((Ntimes,len(Qbins)-1))
 Q_caus_pdf = np.zeros((Ntimes,len(Qbins)-1))
+xi = np.zeros((Nx,Ny//2+1),dtype = np.complex128)
+A = np.zeros((d,d,Nx,Ny//2+1),dtype = np.complex128)
+u = xi.copy()
+v = xi.copy()
+xi_r = np.zeros((Nx,Ny),dtype = np.float64)
+Q_field = xi_r.copy()
+sig_field = xi_r.copy()
+Ar = np.zeros((d,d,Nx,Ny),dtype = np.float64)
 # eiga = np.zeros((Ntimes, Nprtcl,3)).astype(complex)
 # eigz = np.zeros((Ntimes, Nprtcl,3)).astype(complex)
 # causeiga = []
@@ -184,8 +197,11 @@ for i,t in enumerate(times):
     print(f"loading time {t}",end='\r')
     TrZ[i] = np.einsum('...ii->...', np.load(prtcl_loadPath/f"time_{t:.2f}/prtcl_Z.npy"))
     caus_count[i] =  np.load(prtcl_loadPath/f"time_{t:.2f}/caus_count.npy")
+    final_caus_count = np.load(prtcl_loadPath/f"time_{times[-1]:.2f}/caus_count.npy")
+    # print(f"final_caus_count: {np.sum(final_caus_count>0)}")
     newcaus_idx = np.argwhere(caus_count[i] > caus_count[i-1]) if i>0 else np.array([])
     if newcaus_idx.size>0:
+        # print(newcaus_idx.size)
         tfp[newcaus_idx] = t
         tis = np.append(tis,tip[newcaus_idx])
         tfs = np.append(tfs,tfp[newcaus_idx])
@@ -203,28 +219,37 @@ for i,t in enumerate(times):
     v[:] = -1j*kx*lapinv*xi
     # ur = ifft2(u) 
     # vr = ifft2(v)
+    A = np.zeros((d,d,Nx,Ny//2+1),dtype = np.complex128)
     A[0,0] = 1j*kx*u
     A[0,1] = 1j*ky*u
     A[1,0] = 1j*kx*v
     A[1,1] = 1j*ky*v
-    Ar = np.zeros((d,d,Nx,Ny),dtype = np.float64)
-    # Q_field = 0.0
+    Q_field[:] = 0.0
     for ii in range(d):
         for jj in range(d):
             Ar[ii,jj] = ifft2(A[ii,jj])
 
-    Q_field[:] = -0.5*st*np.einsum('ij...,ji...->...',Ar,Ar)
-    Q_field_pdf[i,:]  = np.histogram(Q_field.ravel(),bins = Qbins)[0]/Nx*Ny
+    Q_field[:] = -0.5*np.einsum('ij...,ji...->...',Ar,Ar)
+    sig_field[:] = (xi_r**2 - 4*Q_field)**0.5
+    Q_field_pdf[i,:]  = st**2*np.histogram(Q_field.ravel(),bins = Qbins)[0]/(Nx*Ny)
+    if i == 0:
+        xi_rms = np.sqrt(np.mean(xi_r**2))
+        sig_rms = np.sqrt(np.mean(sig_field**2))
+        Q_rms = np.sqrt(np.mean(Q_field**2))
+    
     # print(Q_field.shape)
     # print(np.max(Q_field),np.min(Q_field),np.mean(Q_field))
     # pos_test = np.array([(x.ravel())[::2],(y.ravel())[::2]]).T + np.random.random((Nx*Ny//2,2))*dx*0.1
     # Qinterp_test = np.zeros(pos_test.shape[0])
     # Qinterp_test[:] = interp_spline(pos_test,Q_field,Qinterp_test)
     # print(np.min(Qinterp_test),np.mean(Qinterp_test),np.max(Qinterp_test))
-    Qinterp[i,:] = interp_spline(pos[i],Q_field,Qinterp[i,:]) 
+    Qinterp[i,:] = st**2*interp_spline(pos[i],Q_field,Qinterp[i,:]) 
+    xiinterp[i,:] = st*interp_spline(pos[i],xi_r,xiinterp[i,:])
+    siginterp[i,:] = st*interp_spline(pos[i],sig_field,siginterp[i,:])
+    
     Q_particle_pdf[i,:] = np.histogram(Qinterp[i,:],bins = Qbins)[0]/Nprtcl
-    # print(np.min(Qinterp[i,:]),np.mean(Qinterp[i,:]),np.max(Qinterp[i,:]))
-    # print(i)
+    #print(np.min(Qinterp[i,:]),np.mean(Qinterp[i,:]),np.max(Qinterp[i,:]))
+    #print(i)
     causidx = np.argwhere(caus_count[i] > 0)
 
     if caus_count[i].any() > 0:
@@ -235,95 +260,116 @@ for i,t in enumerate(times):
     # Qstd[i] = np.std(Qinterp)
 # print(Qinterp)
 # Q_caus = Qinterp[:,caus_count[-1] > 0]
+diff_mat = caus_count[1:] - caus_count[:-1]
 maxdt = np.max(tfs-tis)
 maxsize = np.sum(times<= maxdt)
 Q_caus_shifted = np.zeros((maxsize,int(np.sum(caus_count[-1]))))
+Q_caus_shifted_high = np.zeros((maxsize,1))
+Q_caus_shifted_low = np.zeros((maxsize,1))
+high_omg_Q_caus_shifted = np.zeros((maxsize,1))
+high_strain_Q_caus_shifted = np.zeros((maxsize,1))
+extreme_high_Q_caus_shifed = np.zeros((maxsize,1))
+extreme_low_Q_caus_shifed = np.zeros((maxsize,1))
+Q_temp_shifted = np.zeros(maxsize)
+                                     
+
+
 ins = 0
 causidx = np.argwhere(caus_count[-1] > 0)
 # print(causidx)
-for i in causidx.ravel():
-    # print(i)
-    # print(caus_count[-1,i])
-    """
-    For each particle, cau_count will give how many instances to split the particle into. 
-    Then for each of the instances, add the Q in the Q_caus_pdf. 
-    """
-    # print(caus_count[-1,i])
-    for j in np.arange(caus_count[-1,i]):
-        region = ((caus_count[:,i] > j-1)*(caus_count[:,i] <= j)).ravel()
-        regionlen = np.sum(region)
-        # print(region.shape)
-        print(Qinterp[region,i].shape)
-        # print(Q_caus_shifted[(maxsize-regionlen):,ins].shape)
-        # print(i,ins)
-        Q_caus_shifted[(maxsize-regionlen):,ins] = Qinterp[region,i]
-        ins = ins + 1
+@njit(parallel = True)
+def shifted_Q(causidx, caus_count):
+    for i in causidx.ravel():
+        # print(i)
+        # print(caus_count[-1,i])
+        """
+        For each particle, cau_count will give how many instances to split the particle into. 
+        Then for each of the instances, add the Q in the Q_caus_pdf. 
+        """
+        # print(caus_count[-1,i])
+        for j in np.arange(caus_count[-1,i]):
+            region = ((caus_count[:,i] > j-1)*(caus_count[:,i] <= j)).ravel() #region in time where this caustics happened
+            regionlen = np.sum(region)
+            # print(region.shape)
+            # print(Qinterp[region,i].shape)
+            # print(Q_caus_shifted[(maxsize-regionlen):,ins].shape)
+            # print(i,ins)
+            Q_temp_shifted[:] = 0.0
+            Q_caus_shifted[(maxsize-regionlen):,ins] = Qinterp[region,i] # Adding the trajectory of the particle and rest zero.
+            if Qinterp[region,i][0]> 0.0:
+                Q_temp_shifted[(maxsize-regionlen):] = Qinterp[region,i]
+                Q_caus_shifted_high = np.append(Q_caus_shifted_high,Q_temp_shifted[:,None], axis = 1)
+                Q_temp_shifted[:] = 0.0
+            
+            elif Qinterp[region,i][0]< 0.0:
+                Q_temp_shifted[(maxsize-regionlen):] = Qinterp[region,i]
+                Q_caus_shifted_low = np.append(Q_caus_shifted_low,Q_temp_shifted[:,None], axis = 1)
+                Q_temp_shifted[:] = 0.0
+            
+            if  Qinterp[region,i][0]> 4*Q_rms:
+                Q_temp_shifted[(maxsize-regionlen):] = Qinterp[region,i]
+                extreme_high_Q_caus_shifed = np.append(extreme_high_Q_caus_shifed,Q_temp_shifted[:,None],axis=1)
+                Q_temp_shifted[:] = 0.0
+            
+            elif  Qinterp[region,i][0]< -4*Q_rms:
+                Q_temp_shifted[(maxsize-regionlen):] = Qinterp[region,i]
+                extreme_low_Q_caus_shifed = np.append(extreme_low_Q_caus_shifed,Q_temp_shifted[:,None],axis=1)
+                Q_temp_shifted[:] = 0.0
+                
+            if np.abs(xiinterp[region,i][0])> 4*xi_rms:
+                Q_temp_shifted[(maxsize-regionlen):] = Qinterp[region,i]
+                Q_caus_shifted_low = np.append(Q_caus_shifted_low,Q_temp_shifted[:,None], axis = 1)
+                Q_temp_shifted[:] = 0.0
+
+            
+            if np.abs(siginterp[region,i][0])> 4*sig_rms:
+                Q_temp_shifted[(maxsize-regionlen):] = Qinterp[region,i]
+                high_strain_Q_caus_shifted = np.append(high_strain_Q_caus_shifted,Q_temp_shifted[:,None],axis=1)
+                Q_temp_shifted[:] = 0.0
+            
+                
+            #! Remove the uneccessary indices
+            ins = ins + 1
+    return Q_caus_shifted,Q_caus_shifted_high,Q_caus_shifted_low,high_omg_Q_caus_shifted,high_strain_Q_caus_shifted,extreme_high_Q_caus_shifed,extreme_low_Q_caus_shifed
 print(f"Non-zero Q_caus_shifted vals:{np.sum(Q_caus_shifted>0)} ")
-# print(ins,tis.size)
-# caus_traj = pos[np.argwhere(times[:,None] >)]
-    # eiga[:] = np.load(loadPath/f"eiga_{i+1+exception}.npy")
-    # eigz[:] = np.load(loadPath/f"eigz_{i+1+exception}.npy")
-    # initQ[i*Nprtcl:(i+1)*Nprtcl] = -0.5*np.sum(eiga[0,:]**2,axis =1).real
-    # initR[i*Nprtcl:(i+1)*Nprtcl] = -1/3*np.sum(eiga[0,:]**3,axis =1).real
-
-#     ## ------------ data for caustics particles ------------ ##
-#     """ Calculating the indices of the particles which had caustics"""
-#     prtcls = np.arange(TrZ.shape[1])[np.isnan(TrZ).any(axis =0)] 
-#     causno = causno + len(prtcls)
-#     # print(np.moveaxis(TrZ[:,prtcls],0,1).shape)
-#     """Picking out the TrZ of those particles but putting particles to be in axis 0
-#     so that we can add row wise to the list"""
-#     causTrZ = causTrZ + list(np.moveaxis(TrZ[:,prtcls],0,1))
-#     # causeiga = causeiga + list(np.moveaxis(eiga[:,prtcls],0,1))
-#     # causeigz = causeigz + list(np.moveaxis(eigz[:,prtcls],0,1))
-#     causvel = causvel + list(np.moveaxis(vel[:,prtcls],0,1))
-#     ## ------------------------------------------------------ ## 
-    
-# #     ## ------- distribution for non-caustpythoics particles ------ ##
-# #     Q_s1 = -0.5*np.sum(eiga[:,~prtcls]**2, axis = 2).real
-# #     R_s1 = -1/3*np.sum(eiga[:,~prtcls]**3, axis = 2).real
-# #     t_s1 = times[:,None]*np.ones_like(Q_s1)
-# #     Qpdf[:] = Qpdf + np.histogram2d(t_s1.ravel(),Q_s1.ravel(), bins = (tbins, Qbins))[0] # type: ignore
-# #     Rpdf[:] = Qpdf + np.histogram2d(t_s1.ravel(),R_s1.ravel(), bins = (tbins, Rbins))[0] # type: ignore
-# #     ## ------------------------------------------------------ ##
-
-# del eiga,eigz,TrZ,vel
-# # np.save(loadPath/f"Qpdf_non_caustic.npy",Qpdf/(batches*Nprtcl-causno))
-# # np.save(loadPath/f"Rpdf_non_caustic.npy",Rpdf/(batches*Nprtcl-causno))
-# # del Qpdf,Rpdf,Q_s1,R_s1,t_s1
-# # raise SystemExit
-
+Q_caus_shifted,Q_caus_shifted_high,Q_caus_shifted_low,high_omg_Q_caus_shifted,high_strain_Q_caus_shifted,extreme_high_Q_caus_shifed,extreme_low_Q_caus_shifed = shifted_Q(causidx,caus_count)
 print(caus_count.shape)
 print(f"fraction of caustics: {np.sum(caus_count,axis = 1)/Nprtcl} at stokes number {st/tf}")
 # if (prtcl_loadPath/f"caus-details.hdf5").exists():
 #     os.remove(prtcl_loadPath/f"caus-details.hdf5")
-print(Q_caus_shifted)
-with h5py.File(prtcl_loadPath/f"caus-details.hdf5",'w') as f:
-    # try:
-    caus_ratio = f.create_dataset("Caustics_ratio",data = (np.sum(caus_count>0,axis = 1)/Nprtcl),dtype = np.float64)
-    times = f.create_dataset("times",data = times,dtype = np.float64)
-    caus_new = np.sum(caus_count>0,axis = 1)/Nprtcl -np.roll(np.sum(caus_count>0,axis = 1)/Nprtcl ,1)
-    caus_new[0] = 0
-    newcaus = f.create_dataset("new_caus",data =  caus_new,dtype = np.float64)
-    caus_same = np.sum((caus_count >1)*(caus_count > np.roll(caus_count,1,axis = 0)),axis = 1)/Nprtcl
-    caus_same[0] = 0
-    samecaus = f.create_dataset("same_caus",data = caus_same,dtype = np.float64)
+# print(Q_caus_shifted)
+# with h5py.File(prtcl_loadPath/f"caus-details.hdf5",'w') as f:
+#     # try:
+#     caus_ratio = f.create_dataset("Caustics_ratio",data = (np.sum(caus_count>0,axis = 1)/Nprtcl),dtype = np.float64)
+#     times = f.create_dataset("times",data = times,dtype = np.float64)
+#     caus_new = np.sum(caus_count>0,axis = 1)/Nprtcl -np.roll(np.sum(caus_count>0,axis = 1)/Nprtcl ,1)
+#     caus_new[0] = 0
+#     newcaus = f.create_dataset("new_caus",data =  caus_new,dtype = np.float64)
+#     caus_same = np.sum((caus_count >1)*(caus_count > np.roll(caus_count,1,axis = 0)),axis = 1)/Nprtcl
+#     caus_same[0] = 0
+#     samecaus = f.create_dataset("same_caus",data = caus_same,dtype = np.float64)
     
-    meanQ = np.mean(Qinterp,axis = 1)
-    print(meanQ)
-    stdQ = np.std(Qinterp,axis = 1)
-    print(np.min(stdQ),np.max(stdQ))
-    Qmean = f.create_dataset("Qmean",data = meanQ,dtype = np.float64)
-    Qstd = f.create_dataset("Qstd",data = stdQ,dtype = np.float64)
+#     meanQ = np.mean(Qinterp,axis = 1)
+#     print(meanQ)
+#     stdQ = np.std(Qinterp,axis = 1)
+#     print(np.min(stdQ),np.max(stdQ))
+#     Qmean = f.create_dataset("Qmean",data = meanQ,dtype = np.float64)
+#     Qstd = f.create_dataset("Qstd",data = stdQ,dtype = np.float64)
 
-    causQmean = f.create_dataset("causQmean",data = causQmean,dtype = np.float64)
-    causQstd = f.create_dataset("causQstd",data = causQstd,dtype = np.float64)
+#     causQmean = f.create_dataset("causQmean",data = causQmean,dtype = np.float64)
+#     causQstd = f.create_dataset("causQstd",data = causQstd,dtype = np.float64)
     
-    Q_field_pdf = f.create_dataset("Q_field_pdf",data = Q_field_pdf,dtype = np.float64)
-    Q_particle_pdf = f.create_dataset("Q_particle_pdf",data = Q_particle_pdf,dtype = np.float64)
-    Q_caus_pdf = f.create_dataset("Q_caus_pdf",data = Q_caus_pdf,dtype = np.float64)
+#     Q_field_pdf = f.create_dataset("Q_field_pdf",data = Q_field_pdf,dtype = np.float64)
+#     Q_particle_pdf = f.create_dataset("Q_particle_pdf",data = Q_particle_pdf,dtype = np.float64)
+#     Q_caus_pdf = f.create_dataset("Q_caus_pdf",data = Q_caus_pdf,dtype = np.float64)
     
-    Q_caus_shifted = f.create_dataset("Q_caus_shifted",data = Q_caus_shifted,dtype = np.float64,compression = 'gzip')
-    print(f"Saved the data in {str(prtcl_loadPath)}")
+#     Q_caus_shifted = f.create_dataset("Q_caus_shifted",data = Q_caus_shifted,dtype = np.float64,compression = 'gzip')
+#     print(f"Saved the data in {str(prtcl_loadPath)}")
+#     Q_caus_shifted_high = f.create_dataset("Q_caus_shifted_high",data = Q_caus_shifted_high,dtype = np.float64,compression = 'gzip')
+#     Q_caus_shifted_low = f.create_dataset("Q_caus_shifted_low",data = Q_caus_shifted_low,dtype = np.float64,compression = 'gzip')
+#     high_omg_Q_caus_shifted = f.create_dataset("high_omg_Q_caus_shifted",data = high_omg_Q_caus_shifted,dtype = np.float64,compression = 'gzip')
+#     high_strain_Q_caus_shifted = f.create_dataset("high_strain_Q_caus_shifted",data = high_strain_Q_caus_shifted,dtype = np.float64,compression = 'gzip')
+#     extreme_high_Q_caus_shifed = f.create_dataset("extreme_high_Q_caus_shifed",data = extreme_high_Q_caus_shifed,dtype = np.float64,compression = 'gzip')
+#     extreme_low_Q_caus_shifed = f.create_dataset("extreme_low_Q_caus_shifed",data = extreme_low_Q_caus_shifed,dtype = np.float64,compression = 'gzip')
 
-# %%
+# # %%
