@@ -20,7 +20,7 @@ Re = 1/nu if nu > 0 else np.inf # Reynolds number
 N = Nx = Ny = params["N"] # Grid size
 dt = params["dt"] # Timestep
 # T = params["T"] # Final time
-T = 20.0# Final time
+T = 250.0# Final time
 einit = params["einit"] # Initial energy
 kinit = params["kinit"] # Initial energy is distributed among these wavenumbers
 linnu = params["linnu"] # Linear drag co-efficient
@@ -233,9 +233,9 @@ for i,t in enumerate(times):
     sig_field[:] = (xi_r**2 - 4*Q_field)**0.5
     Q_field_pdf[i,:]  = st**2*np.histogram(Q_field.ravel(),bins = Qbins)[0]/(Nx*Ny)
     if i == 0:
-        xi_rms = np.sqrt(np.mean(xi_r**2))
-        sig_rms = np.sqrt(np.mean(sig_field**2))
-        Q_rms = np.sqrt(np.mean(Q_field**2))
+        xi_rms = st*np.sqrt(np.mean(st*xi_r**2))
+        sig_rms = st*np.sqrt(np.mean(sig_field**2))
+        Q_rms = st**2*np.sqrt(np.mean(Q_field**2))
     
     # print(Q_field.shape)
     # print(np.max(Q_field),np.min(Q_field),np.mean(Q_field))
@@ -245,7 +245,6 @@ for i,t in enumerate(times):
     # print(np.min(Qinterp_test),np.mean(Qinterp_test),np.max(Qinterp_test))
     Qinterp[i,:] = st**2*interp_spline(pos[i],Q_field,Qinterp[i,:]) 
     xiinterp[i,:] = st*interp_spline(pos[i],xi_r,xiinterp[i,:])
-    siginterp[i,:] = st*interp_spline(pos[i],sig_field,siginterp[i,:])
     
     Q_particle_pdf[i,:] = np.histogram(Qinterp[i,:],bins = Qbins)[0]/Nprtcl
     #print(np.min(Qinterp[i,:]),np.mean(Qinterp[i,:]),np.max(Qinterp[i,:]))
@@ -260,84 +259,14 @@ for i,t in enumerate(times):
     # Qstd[i] = np.std(Qinterp)
 # print(Qinterp)
 # Q_caus = Qinterp[:,caus_count[-1] > 0]
-diff_mat = caus_count[1:] - caus_count[:-1]
+
+del pos,vel
+# %%
 maxdt = np.max(tfs-tis)
 maxsize = np.sum(times<= maxdt)
 Q_caus_shifted = np.zeros((maxsize,int(np.sum(caus_count[-1]))))
-Q_caus_shifted_high = np.zeros((maxsize,1))
-Q_caus_shifted_low = np.zeros((maxsize,1))
-high_omg_Q_caus_shifted = np.zeros((maxsize,1))
-high_strain_Q_caus_shifted = np.zeros((maxsize,1))
-extreme_high_Q_caus_shifed = np.zeros((maxsize,1))
-extreme_low_Q_caus_shifed = np.zeros((maxsize,1))
-Q_temp_shifted = np.zeros(maxsize)
-                                     
+omg_caus_shifted = np.zeros((maxsize,int(np.sum(caus_count[-1]))))
 
-
-ins = 0
-causidx = np.argwhere(caus_count[-1] > 0)
-# print(causidx)
-@njit(parallel = True)
-def shifted_Q(causidx, caus_count):
-    for i in causidx.ravel():
-        # print(i)
-        # print(caus_count[-1,i])
-        """
-        For each particle, cau_count will give how many instances to split the particle into. 
-        Then for each of the instances, add the Q in the Q_caus_pdf. 
-        """
-        # print(caus_count[-1,i])
-        for j in np.arange(caus_count[-1,i]):
-            region = ((caus_count[:,i] > j-1)*(caus_count[:,i] <= j)).ravel() #region in time where this caustics happened
-            regionlen = np.sum(region)
-            # print(region.shape)
-            # print(Qinterp[region,i].shape)
-            # print(Q_caus_shifted[(maxsize-regionlen):,ins].shape)
-            # print(i,ins)
-            Q_temp_shifted[:] = 0.0
-            Q_caus_shifted[(maxsize-regionlen):,ins] = Qinterp[region,i] # Adding the trajectory of the particle and rest zero.
-            if Qinterp[region,i][0]> 0.0:
-                Q_temp_shifted[(maxsize-regionlen):] = Qinterp[region,i]
-                Q_caus_shifted_high = np.append(Q_caus_shifted_high,Q_temp_shifted[:,None], axis = 1)
-                Q_temp_shifted[:] = 0.0
-            
-            elif Qinterp[region,i][0]< 0.0:
-                Q_temp_shifted[(maxsize-regionlen):] = Qinterp[region,i]
-                Q_caus_shifted_low = np.append(Q_caus_shifted_low,Q_temp_shifted[:,None], axis = 1)
-                Q_temp_shifted[:] = 0.0
-            
-            if  Qinterp[region,i][0]> 4*Q_rms:
-                Q_temp_shifted[(maxsize-regionlen):] = Qinterp[region,i]
-                extreme_high_Q_caus_shifed = np.append(extreme_high_Q_caus_shifed,Q_temp_shifted[:,None],axis=1)
-                Q_temp_shifted[:] = 0.0
-            
-            elif  Qinterp[region,i][0]< -4*Q_rms:
-                Q_temp_shifted[(maxsize-regionlen):] = Qinterp[region,i]
-                extreme_low_Q_caus_shifed = np.append(extreme_low_Q_caus_shifed,Q_temp_shifted[:,None],axis=1)
-                Q_temp_shifted[:] = 0.0
-                
-            if np.abs(xiinterp[region,i][0])> 4*xi_rms:
-                Q_temp_shifted[(maxsize-regionlen):] = Qinterp[region,i]
-                Q_caus_shifted_low = np.append(Q_caus_shifted_low,Q_temp_shifted[:,None], axis = 1)
-                Q_temp_shifted[:] = 0.0
-
-            
-            if np.abs(siginterp[region,i][0])> 4*sig_rms:
-                Q_temp_shifted[(maxsize-regionlen):] = Qinterp[region,i]
-                high_strain_Q_caus_shifted = np.append(high_strain_Q_caus_shifted,Q_temp_shifted[:,None],axis=1)
-                Q_temp_shifted[:] = 0.0
-            
-                
-            #! Remove the uneccessary indices
-            ins = ins + 1
-    return Q_caus_shifted,Q_caus_shifted_high,Q_caus_shifted_low,high_omg_Q_caus_shifted,high_strain_Q_caus_shifted,extreme_high_Q_caus_shifed,extreme_low_Q_caus_shifed
-print(f"Non-zero Q_caus_shifted vals:{np.sum(Q_caus_shifted>0)} ")
-Q_caus_shifted,Q_caus_shifted_high,Q_caus_shifted_low,high_omg_Q_caus_shifted,high_strain_Q_caus_shifted,extreme_high_Q_caus_shifed,extreme_low_Q_caus_shifed = shifted_Q(causidx,caus_count)
-print(caus_count.shape)
-print(f"fraction of caustics: {np.sum(caus_count,axis = 1)/Nprtcl} at stokes number {st/tf}")
-# if (prtcl_loadPath/f"caus-details.hdf5").exists():
-#     os.remove(prtcl_loadPath/f"caus-details.hdf5")
-# print(Q_caus_shifted)
 # with h5py.File(prtcl_loadPath/f"caus-details.hdf5",'w') as f:
 #     # try:
 #     caus_ratio = f.create_dataset("Caustics_ratio",data = (np.sum(caus_count>0,axis = 1)/Nprtcl),dtype = np.float64)
@@ -362,14 +291,71 @@ print(f"fraction of caustics: {np.sum(caus_count,axis = 1)/Nprtcl} at stokes num
 #     Q_field_pdf = f.create_dataset("Q_field_pdf",data = Q_field_pdf,dtype = np.float64)
 #     Q_particle_pdf = f.create_dataset("Q_particle_pdf",data = Q_particle_pdf,dtype = np.float64)
 #     Q_caus_pdf = f.create_dataset("Q_caus_pdf",data = Q_caus_pdf,dtype = np.float64)
-    
-#     Q_caus_shifted = f.create_dataset("Q_caus_shifted",data = Q_caus_shifted,dtype = np.float64,compression = 'gzip')
-#     print(f"Saved the data in {str(prtcl_loadPath)}")
-#     Q_caus_shifted_high = f.create_dataset("Q_caus_shifted_high",data = Q_caus_shifted_high,dtype = np.float64,compression = 'gzip')
-#     Q_caus_shifted_low = f.create_dataset("Q_caus_shifted_low",data = Q_caus_shifted_low,dtype = np.float64,compression = 'gzip')
-#     high_omg_Q_caus_shifted = f.create_dataset("high_omg_Q_caus_shifted",data = high_omg_Q_caus_shifted,dtype = np.float64,compression = 'gzip')
-#     high_strain_Q_caus_shifted = f.create_dataset("high_strain_Q_caus_shifted",data = high_strain_Q_caus_shifted,dtype = np.float64,compression = 'gzip')
-#     extreme_high_Q_caus_shifed = f.create_dataset("extreme_high_Q_caus_shifed",data = extreme_high_Q_caus_shifed,dtype = np.float64,compression = 'gzip')
-#     extreme_low_Q_caus_shifed = f.create_dataset("extreme_low_Q_caus_shifed",data = extreme_low_Q_caus_shifed,dtype = np.float64,compression = 'gzip')
 
-# # %%
+# del caus_ratio,caus_new, caus_same,causQmean,causQstd,Qmean,Qstd,Q_field_pdf,Q_particle_pdf,Q_caus_pdf
+del causQmean,causQstd,Qmean,Qstd,Q_field_pdf,Q_particle_pdf,Q_caus_pdf
+
+ins = 0
+causidx = np.argwhere(caus_count[-1] > 0)
+# print(causidx)
+
+for i in causidx.ravel():
+    # print(i)
+    # print(caus_count[-1,i])
+    """
+    For each particle, cau_count will give how many instances to split the particle into. 
+    Then for each of the instances, add the Q in the Q_caus_pdf. 
+    """
+    # print(caus_count[-1,i])
+    for j in np.arange(caus_count[-1,i]):
+        region = ((caus_count[:,i] > j-1)*(caus_count[:,i] <= j)).ravel() #region in time where this caustics happened
+        regionlen = np.sum(region)
+        # print(region.shape)
+        # print(Qinterp[region,i].shape)
+        # print(Q_caus_shifted[(maxsize-regionlen):,ins].shape)
+        # print(i,ins)
+        # Q_temp_shifted[:] = 0.0
+        Q_caus_shifted[(maxsize-regionlen):,ins] = Qinterp[region,i] # Adding the trajectory of the particle and rest zero.
+        omg_caus_shifted[(maxsize-regionlen):,ins] = xiinterp[region,i]
+            
+        #! Remove the uneccessary indices
+        ins = ins + 1
+del Qinterp,xiinterp
+print(caus_count.shape)
+    
+print(f"fraction of caustics: {np.sum(caus_count,axis = 1)/Nprtcl} at stokes number {st/tf}")
+def first_value(x):
+    """This returns the first non-zero value of the shifted Q_caus"""
+    
+    diff_gate = np.cumsum((x !=0)*1,axis = 0)
+    return x[diff_gate == 1]
+    
+Q_initial = first_value(Q_caus_shifted)
+omg_initial = first_value(omg_caus_shifted)
+sig_initial = np.sqrt(omg_initial**2 - 4*Q_initial)**0.5
+Q_caus_shifted_vort = Q_caus_shifted[:,Q_initial>0]
+Q_caus_shifted_strain = Q_caus_shifted[:,Q_initial<0]
+Q_caus_shifted_extreme_vort = Q_caus_shifted[:,np.abs(omg_initial)>2*xi_rms]
+Q_caus_shifted_extreme_strain = Q_caus_shifted[:,sig_initial>2*sig_rms]
+Q_caus_shifted_extreme_pos_Q = Q_caus_shifted[:,Q_initial>4*Q_rms]
+Q_caus_shifted_extreme_neg_Q = Q_caus_shifted[:,Q_initial<-4*Q_rms]
+
+print(Q_caus_shifted_strain.shape,Q_caus_shifted_vort.shape,Q_caus_shifted_extreme_vort.shape, Q_caus_shifted_extreme_strain.shape, Q_caus_shifted_extreme_pos_Q.shape,Q_caus_shifted_extreme_neg_Q.shape
+)
+if (prtcl_loadPath/f"caus-details.hdf5").exists():
+    os.remove(prtcl_loadPath/f"caus-details.hdf5")
+print(Q_caus_shifted)
+with h5py.File(prtcl_loadPath/f"caus-details.hdf5",'a') as f:
+    
+    Q_caus_shifted = f.create_dataset("Q_caus_shifted",data = Q_caus_shifted,dtype = np.float64,compression = 'gzip')
+    print(f"Saved the data in {str(prtcl_loadPath)}")
+    Q_caus_shifted_vort = f.create_dataset("Q_caus_shifted_vort",data = Q_caus_shifted_vort,dtype = np.float64,compression = 'gzip')
+    Q_caus_shifted_strain = f.create_dataset("Q_caus_shifted_strain",data = Q_caus_shifted_strain,dtype = np.float64,compression = 'gzip')
+    Q_caus_shifted_extreme_vort = f.create_dataset("Q_caus_shifted_extreme_vort",data = Q_caus_shifted_extreme_vort,dtype = np.float64,compression = 'gzip')
+    Q_caus_shifted_extreme_strain = f.create_dataset("Q_caus_shifted_extreme_strain",data = Q_caus_shifted_extreme_strain,dtype = np.float64,compression = 'gzip')
+    Q_caus_shifted_extreme_pos_Q = f.create_dataset("Q_caus_shifted_extreme_pos_Q",data = Q_caus_shifted_extreme_pos_Q,dtype = np.float64,compression = 'gzip')
+    Q_caus_shifted_extreme_neg_Q = f.create_dataset("Q_caus_shifted_extreme_neg_Q",data = Q_caus_shifted_extreme_neg_Q,dtype = np.float64,compression = 'gzip')
+    print(f"Saved the data in {str(prtcl_loadPath)}")
+
+
+# %%
