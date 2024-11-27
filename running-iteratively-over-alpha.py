@@ -14,8 +14,10 @@ for ii,alpha in enumerate(alpha_values[1::2]):
     parameters['alph'] = alpha
     
     # Save the modified parameters to the JSON file
+    time.sleep(2)
     with open('parameters.json', 'w') as file:
         json.dump(parameters, file, indent=4)
+    time.sleep(2)
     print(f'Running with alpha={alpha}')
     # Run the Python script
     output_file = f'postproc_{alpha*100:.0f}.out'

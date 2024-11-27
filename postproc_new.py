@@ -26,8 +26,6 @@ kinit = params["kinit"] # Initial energy is distributed among these wavenumbers
 linnu = params["linnu"] # Linear drag co-efficient
 lp = params["lp"] # Power of the laplacian in the hyperviscous term
 shell_count = params["shell_count"] # The shells where the energy is injected
-alph = 1.0 # The density ratio
-# alph = params["alph"] # The density ratio
 alph = params["alph"] # The density ratio
 Nprtcl = int(params["Nprtcl"]*Nx*Ny) # Number of particles
 tf = params["tf"] # Final time for the particles
@@ -267,33 +265,36 @@ maxsize = np.sum(times<= maxdt)
 Q_caus_shifted = np.zeros((maxsize,int(np.sum(caus_count[-1]))))
 omg_caus_shifted = np.zeros((maxsize,int(np.sum(caus_count[-1]))))
 
-# with h5py.File(prtcl_loadPath/f"caus-details.hdf5",'w') as f:
-#     # try:
-#     caus_ratio = f.create_dataset("Caustics_ratio",data = (np.sum(caus_count>0,axis = 1)/Nprtcl),dtype = np.float64)
-#     times = f.create_dataset("times",data = times,dtype = np.float64)
-#     caus_new = np.sum(caus_count>0,axis = 1)/Nprtcl -np.roll(np.sum(caus_count>0,axis = 1)/Nprtcl ,1)
-#     caus_new[0] = 0
-#     newcaus = f.create_dataset("new_caus",data =  caus_new,dtype = np.float64)
-#     caus_same = np.sum((caus_count >1)*(caus_count > np.roll(caus_count,1,axis = 0)),axis = 1)/Nprtcl
-#     caus_same[0] = 0
-#     samecaus = f.create_dataset("same_caus",data = caus_same,dtype = np.float64)
-    
-#     meanQ = np.mean(Qinterp,axis = 1)
-#     print(meanQ)
-#     stdQ = np.std(Qinterp,axis = 1)
-#     print(np.min(stdQ),np.max(stdQ))
-#     Qmean = f.create_dataset("Qmean",data = meanQ,dtype = np.float64)
-#     Qstd = f.create_dataset("Qstd",data = stdQ,dtype = np.float64)
+if (prtcl_loadPath/f"caus-details.hdf5").exists():
+    os.remove(prtcl_loadPath/f"caus-details.hdf5")
 
-#     causQmean = f.create_dataset("causQmean",data = causQmean,dtype = np.float64)
-#     causQstd = f.create_dataset("causQstd",data = causQstd,dtype = np.float64)
+with h5py.File(prtcl_loadPath/f"caus-details.hdf5",'w') as f:
+    # try:
+    caus_ratio = f.create_dataset("Caustics_ratio",data = (np.sum(caus_count>0,axis = 1)/Nprtcl),dtype = np.float64)
+    times = f.create_dataset("times",data = times,dtype = np.float64)
+    caus_new = np.sum(caus_count>0,axis = 1)/Nprtcl -np.roll(np.sum(caus_count>0,axis = 1)/Nprtcl ,1)
+    caus_new[0] = 0
+    newcaus = f.create_dataset("new_caus",data =  caus_new,dtype = np.float64)
+    caus_same = np.sum((caus_count >1)*(caus_count > np.roll(caus_count,1,axis = 0)),axis = 1)/Nprtcl
+    caus_same[0] = 0
+    samecaus = f.create_dataset("same_caus",data = caus_same,dtype = np.float64)
     
-#     Q_field_pdf = f.create_dataset("Q_field_pdf",data = Q_field_pdf,dtype = np.float64)
-#     Q_particle_pdf = f.create_dataset("Q_particle_pdf",data = Q_particle_pdf,dtype = np.float64)
-#     Q_caus_pdf = f.create_dataset("Q_caus_pdf",data = Q_caus_pdf,dtype = np.float64)
+    meanQ = np.mean(Qinterp,axis = 1)
+    print(meanQ)
+    stdQ = np.std(Qinterp,axis = 1)
+    print(np.min(stdQ),np.max(stdQ))
+    Qmean = f.create_dataset("Qmean",data = meanQ,dtype = np.float64)
+    Qstd = f.create_dataset("Qstd",data = stdQ,dtype = np.float64)
 
-# del caus_ratio,caus_new, caus_same,causQmean,causQstd,Qmean,Qstd,Q_field_pdf,Q_particle_pdf,Q_caus_pdf
-del causQmean,causQstd,Qmean,Qstd,Q_field_pdf,Q_particle_pdf,Q_caus_pdf
+    causQmean = f.create_dataset("causQmean",data = causQmean,dtype = np.float64)
+    causQstd = f.create_dataset("causQstd",data = causQstd,dtype = np.float64)
+    
+    Q_field_pdf = f.create_dataset("Q_field_pdf",data = Q_field_pdf,dtype = np.float64)
+    Q_particle_pdf = f.create_dataset("Q_particle_pdf",data = Q_particle_pdf,dtype = np.float64)
+    Q_caus_pdf = f.create_dataset("Q_caus_pdf",data = Q_caus_pdf,dtype = np.float64)
+
+del caus_ratio,caus_new, caus_same,causQmean,causQstd,Qmean,Qstd,Q_field_pdf,Q_particle_pdf,Q_caus_pdf
+# del causQmean,causQstd,Qmean,Qstd,Q_field_pdf,Q_particle_pdf,Q_caus_pdf
 
 ins = 0
 causidx = np.argwhere(caus_count[-1] > 0)
