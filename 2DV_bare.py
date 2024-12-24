@@ -112,8 +112,8 @@ def e2d_to_1d(x):
     return (np.histogram(k.ravel(),bins = shells,weights=x.ravel() )[0]).real
 ## --------------------------------------------------------------
 
-
-f_r = -kf*f0*np.sin(kf*y)
+k_forc = kf
+f_r = -k_forc*f0*np.sin(kf*y)
 f = fft.rfft2(f_r)
 def forcing(xi,psi):
     # """
@@ -228,6 +228,8 @@ def evolve_and_save(f,t,x0):
 # xi0 = -lap*psi0
 xi0_r = -f0*kf*nu*(np.cos(kf*x) + np.cos(kf*y))
 xi0 = fft.rfft2(xi0_r)
+# xi0 = np.load(curr_path/f"data/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/last/w.npy")
+# xi0_r = ifft2(xi0)
 psi0 = -lapinv*xi0
 e_arr = e2d_to_1d(0.5*(xi0*np.conjugate(psi0))*normalize)
 ek_arr0= 0*e_arr.copy()

@@ -20,7 +20,7 @@ Re = 1/nu if nu > 0 else np.inf # Reynolds number
 N = Nx = Ny = params["N"] # Grid size
 dt = params["dt"] # Timestep
 # T = params["T"] # Final time
-T = 250.0# Final time
+T = 75.0# Final time
 einit = params["einit"] # Initial energy
 kinit = params["kinit"] # Initial energy is distributed among these wavenumbers
 linnu = params["linnu"] # Linear drag co-efficient
@@ -113,7 +113,7 @@ curr_path = pathlib.Path(__file__).parent
 iname = "spline" if order == 4 else "linear"
 savePlot = pathlib.Path(f"/home/rajarshi.chattopadhyay/fluid/2DV_and_particles/Plots/iname/Re_{np.round(Re,2)},dt_{dt},N_{N}/")
 savePlot.mkdir(parents=True, exist_ok=True)
-loadPath = pathlib.Path(f"data_{iname}/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/")
+loadPath = pathlib.Path(f"data_nodadt_{iname}/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/")
 prtcl_loadPath = loadPath/f"alpha_{alph:.2}_prtcl/St_{st/tf:.2f}/"
 loadPath.exists()
 # loadPath = pathlib.Path(f"/mnt/pfs/rajarshi.chattopadhyay/Caustics3D/data_new/fluid/omg/alph_0.7000/st_0.00848/dt_8.48e-06")
@@ -138,6 +138,8 @@ The time of caustics
 print(times[-1],st,str(savePlot))
 Ntimes = len(times)
 TrZ = np.zeros((Ntimes, Nprtcl))
+TrZ2 = np.zeros((Ntimes,Nprtcl))
+Z = np.zeros((Nprtcl,d,d))
 caus_count = np.zeros((Ntimes, Nprtcl))
 vel = np.zeros((Ntimes, Nprtcl,d))
 pos = np.zeros((Ntimes, Nprtcl,d))
@@ -193,9 +195,14 @@ v = np.zeros((Nx,Ny//2+1),dtype = np.complex128)
 Q_field = np.zeros((Nx,Ny),dtype = np.float64)
 for i,t in enumerate(times):
     print(f"loading time {t}",end='\r')
-    TrZ[i] = np.einsum('...ii->...', np.load(prtcl_loadPath/f"time_{t:.2f}/prtcl_Z.npy"))
-    caus_count[i] =  np.load(prtcl_loadPath/f"time_{t:.2f}/caus_count.npy")
-    final_caus_count = np.load(prtcl_loadPath/f"time_{times[-1]:.2f}/caus_count.npy")
+    Z[:] =  np.load(prtcl_loadPath/f"time_{t:.2f}/prtcl_Z.npz")["Zmatrix"]
+    # Z[:] =  np.load(prtcl_loadPath/f"time_{t:.2f}/prtcl_Z.npy")
+    TrZ[i] = np.einsum('...ii->...', Z)
+    TrZ2[i] = np.einsum('...ij,...ji->...', Z,Z)
+    caus_count[i] =  np.load(prtcl_loadPath/f"time_{t:.2f}/caus_count.npz")["caustics_count"]
+    # caus_count[i] =  np.load(prtcl_loadPath/f"time_{t:.2f}/caus_count.npy")
+    final_caus_count = np.load(prtcl_loadPath/f"time_{times[-1]:.2f}/caus_count.npz")["caustics_count"]
+    # final_caus_count = np.load(prtcl_loadPath/f"time_{times[-1]:.2f}/caus_count.npy")
     # print(f"final_caus_count: {np.sum(final_caus_count>0)}")
     newcaus_idx = np.argwhere(caus_count[i] > caus_count[i-1]) if i>0 else np.array([])
     if newcaus_idx.size>0:
@@ -207,10 +214,12 @@ for i,t in enumerate(times):
         tip[newcaus_idx] = t
 
 
-    vel[i] = np.load(prtcl_loadPath/f"time_{t:.2f}/vel.npy")
-    pos[i] = np.load(prtcl_loadPath/f"time_{t:.2f}/pos.npy")
+    # vel[i] = np.load(prtcl_loadPath/f"time_{t:.2f}/vel.npy") 
+    vel[i] = np.load(prtcl_loadPath/f"time_{t:.2f}/vel.npz")["vel"]
+    # pos[i] = np.load(prtcl_loadPath/f"time_{t:.2f}/pos.npy")
+    pos[i] = np.load(prtcl_loadPath/f"time_{t:.2f}/pos.npz")["pos"]
     
-    xi[:] = np.load(loadPath/f"time_{t:.2f}/w.npy")
+    xi[:] = np.load(loadPath/f"time_{t:.2f}/w.npz")["vorticity"]
     xi_r[:] = ifft2(xi)
     # print(xi_r.max(),np.sqrt(np.mean(xi_r**2)))
     u[:] = 1j* ky*lapinv*xi
@@ -229,7 +238,7 @@ for i,t in enumerate(times):
 
     Q_field[:] = -0.5*np.einsum('ij...,ji...->...',Ar,Ar)
     sig_field[:] = (xi_r**2 - 4*Q_field)**0.5
-    Q_field_pdf[i,:]  = st**2*np.histogram(Q_field.ravel(),bins = Qbins)[0]/(Nx*Ny)
+    Q_field_pdf[i,:]  = np.histogram(st**2*Q_field.ravel(),bins = Qbins)[0]/(Nx*Ny)
     if i == 0:
         xi_rms = st*np.sqrt(np.mean(st*xi_r**2))
         sig_rms = st*np.sqrt(np.mean(sig_field**2))
@@ -261,9 +270,14 @@ for i,t in enumerate(times):
 del pos,vel
 # %%
 maxdt = np.max(tfs-tis)
-maxsize = np.sum(times<= maxdt)
-Q_caus_shifted = np.zeros((maxsize,int(np.sum(caus_count[-1]))))
-omg_caus_shifted = np.zeros((maxsize,int(np.sum(caus_count[-1]))))
+maxsize = np.sum(times<= maxdt) + 1
+Q_caus_shifted = np.ones((maxsize,int(np.sum(caus_count[-1]))))*65536.
+omg_caus_shifted = np.ones((maxsize,int(np.sum(caus_count[-1]))))*65536.
+TrZ_shifted = np.ones((maxsize,int(np.sum(caus_count[-1]))))*65536.
+TrZ2_shifted = np.ones((maxsize,int(np.sum(caus_count[-1]))))*65536.
+t_caus_len = np.zeros(int(np.sum(caus_count[-1])))
+Q_initial = np.zeros(int(np.sum(caus_count[-1])))
+omg_initial = np.zeros(int(np.sum(caus_count[-1])))
 
 if (prtcl_loadPath/f"caus-details.hdf5").exists():
     os.remove(prtcl_loadPath/f"caus-details.hdf5")
@@ -296,10 +310,10 @@ with h5py.File(prtcl_loadPath/f"caus-details.hdf5",'w') as f:
 del caus_ratio,caus_new, caus_same,causQmean,causQstd,Qmean,Qstd,Q_field_pdf,Q_particle_pdf,Q_caus_pdf
 # del causQmean,causQstd,Qmean,Qstd,Q_field_pdf,Q_particle_pdf,Q_caus_pdf
 
-ins = 0
 causidx = np.argwhere(caus_count[-1] > 0)
 # print(causidx)
-
+ins = 0
+print(f"Maxsize: {maxsize}")
 for i in causidx.ravel():
     # print(i)
     # print(caus_count[-1,i])
@@ -308,18 +322,21 @@ for i in causidx.ravel():
     Then for each of the instances, add the Q in the Q_caus_pdf. 
     """
     # print(caus_count[-1,i])
-    for j in np.arange(caus_count[-1,i]):
-        region = ((caus_count[:,i] > j-1)*(caus_count[:,i] <= j)).ravel() #region in time where this caustics happened
+    for j in range(int(caus_count[-1,i])):
+        region = ((caus_count[:,i] > j-1)*(caus_count[:,i] <= j)    ).ravel() #region in time where this caustics happened
         regionlen = np.sum(region)
-        # print(region.shape)
-        # print(Qinterp[region,i].shape)
-        # print(Q_caus_shifted[(maxsize-regionlen):,ins].shape)
-        # print(i,ins)
-        # Q_temp_shifted[:] = 0.0
-        Q_caus_shifted[(maxsize-regionlen):,ins] = Qinterp[region,i] # Adding the trajectory of the particle and rest zero.
-        omg_caus_shifted[(maxsize-regionlen):,ins] = xiinterp[region,i]
-            
-        #! Remove the uneccessary indices
+        try:
+            t_caus_len[ins] = regionlen
+            Q_caus_shifted[(maxsize-regionlen):,ins] = Qinterp[region,i] # Adding the trajectory of the particle and rest zero.
+            Q_initial[ins] = Q_caus_shifted[(maxsize-regionlen),ins]
+            omg_caus_shifted[(maxsize-regionlen):,ins] = xiinterp[region,i]
+            omg_initial[ins] = omg_caus_shifted[(maxsize-regionlen),ins]
+            TrZ_shifted[(maxsize-regionlen):,ins] = TrZ[region,i]
+            TrZ2_shifted[(maxsize-regionlen):,ins] = TrZ2[region,i]
+        except:
+            print((maxsize-regionlen), regionlen,ins, Q_caus_shifted.shape)
+            raise SystemExit
+
         ins = ins + 1
 del Qinterp,xiinterp
 print(caus_count.shape)
@@ -331,8 +348,6 @@ def first_value(x):
     diff_gate = np.cumsum((x !=0)*1,axis = 0)
     return x[diff_gate == 1]
     
-Q_initial = first_value(Q_caus_shifted)
-omg_initial = first_value(omg_caus_shifted)
 sig_initial = np.sqrt(omg_initial**2 - 4*Q_initial)**0.5
 Q_caus_shifted_vort = Q_caus_shifted[:,Q_initial>0]
 Q_caus_shifted_strain = Q_caus_shifted[:,Q_initial<0]
@@ -343,19 +358,20 @@ Q_caus_shifted_extreme_neg_Q = Q_caus_shifted[:,Q_initial<-4*Q_rms]
 
 print(Q_caus_shifted_strain.shape,Q_caus_shifted_vort.shape,Q_caus_shifted_extreme_vort.shape, Q_caus_shifted_extreme_strain.shape, Q_caus_shifted_extreme_pos_Q.shape,Q_caus_shifted_extreme_neg_Q.shape
 )
-if (prtcl_loadPath/f"caus-details.hdf5").exists():
-    os.remove(prtcl_loadPath/f"caus-details.hdf5")
-print(Q_caus_shifted)
 with h5py.File(prtcl_loadPath/f"caus-details.hdf5",'a') as f:
     
     Q_caus_shifted = f.create_dataset("Q_caus_shifted",data = Q_caus_shifted,dtype = np.float64,compression = 'gzip')
     print(f"Saved the data in {str(prtcl_loadPath)}")
+    omg_caus_shifted = f.create_dataset("omg_caus_shifted",data = omg_caus_shifted,dtype = np.float64,compression = 'gzip')
+    TrZ_shifted = f.create_dataset("TrZ_shifted",data = TrZ_shifted,dtype = np.float64,compression = 'gzip')
+    TrZ2_shifted = f.create_dataset("TrZ2_shifted",data = TrZ2_shifted,dtype = np.float64,compression = 'gzip')
     Q_caus_shifted_vort = f.create_dataset("Q_caus_shifted_vort",data = Q_caus_shifted_vort,dtype = np.float64,compression = 'gzip')
     Q_caus_shifted_strain = f.create_dataset("Q_caus_shifted_strain",data = Q_caus_shifted_strain,dtype = np.float64,compression = 'gzip')
     Q_caus_shifted_extreme_vort = f.create_dataset("Q_caus_shifted_extreme_vort",data = Q_caus_shifted_extreme_vort,dtype = np.float64,compression = 'gzip')
     Q_caus_shifted_extreme_strain = f.create_dataset("Q_caus_shifted_extreme_strain",data = Q_caus_shifted_extreme_strain,dtype = np.float64,compression = 'gzip')
     Q_caus_shifted_extreme_pos_Q = f.create_dataset("Q_caus_shifted_extreme_pos_Q",data = Q_caus_shifted_extreme_pos_Q,dtype = np.float64,compression = 'gzip')
     Q_caus_shifted_extreme_neg_Q = f.create_dataset("Q_caus_shifted_extreme_neg_Q",data = Q_caus_shifted_extreme_neg_Q,dtype = np.float64,compression = 'gzip')
+    t_caus_len = f.create_dataset("t_caus_len",data = t_caus_len,dtype = np.float64,compression = 'gzip')
     print(f"Saved the data in {str(prtcl_loadPath)}")
 
 
