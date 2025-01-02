@@ -3,7 +3,7 @@ import numpy as np
 
 # List of different alpha values to run
 # alpha_values = np.array([0.70,0.72,0.75,0.77,0.8,0.9,0.95,1.0])
-alpha_values = [0.67,0.70,1.0]
+alpha_values = [2/3,0.70,1.0]
 
 # Load the parameters from the JSON file
 with open('parameters.json', 'r') as file:

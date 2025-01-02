@@ -6,6 +6,7 @@ from time import time
 # import h5py
 import pathlib,json
 curr_path = pathlib.Path(__file__).parent
+# fft.config.use_multi_gpus = True
 ## --------------- Details of the code ---------------
     # This program solves the 2D vorticity equation without forcing using RK4 and FFT. 
     # The 2D vorticity equation is given by d_t \xi  + u.\grad \xi= \nu \laplacian \xi.
@@ -33,7 +34,8 @@ nu =params["nu"] # Viscosity
 Re = 1/nu if nu > 0 else np.inf # Reynolds number
 N = Nx = Ny = params["N"] # Grid size
 dt = params["dt"] # Timestep
-T = params["T"] # Final time
+# T = params["T"] # Final time
+T = 1.0 # Final time
 einit = params["einit"] # Initial energy
 kinit = params["kinit"] # Initial energy is distributed among these wavenumbers
 linnu = params["linnu"] # Linear drag co-efficient
@@ -45,6 +47,7 @@ tf = params["tf"] # Final time for the particles
 st = params["st"]*tf # Time period for the particles #! Stokes number when non-dimensionalize by simulation time.
 tp = st # Save the particle data after this many timesteps #!(in simulation time dimension, this is the tp)
 savestep = int(params["savestep"]/dt) # Save the data after this many timesteps
+save_spectra = int(10//dt) # Save the spectra after this many timesteps
 prtcl_savestep = int(params["prtcl_savestep"]/dt) # Save the particle data after this many timesteps
 eta = params["eta"]/(Nx//3) # Desired Kolmogorov length scale
 restart = params["restart"] # Restart from the last saved data
@@ -176,7 +179,9 @@ def e2d_to_1d(x):
 def field_save(i,x_old):
     
     psi[:] = -lapinv*x_old
-    e_arr[:] = e2d_to_1d(0.5*(x_old*np.conjugate(psi))*normalize)
+    if i%save_spectra == 0:
+        print(f"saving e_array")
+        e_arr[:] = e2d_to_1d(0.5*(x_old*np.conjugate(psi))*normalize)
     print(f"Energy at time {np.round(t[i],2)} is {np.sum(e_arr):.4f}",end= '\r')
     # savePath = curr_path/f"data_nodadt_{iname}/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/time_{t[i]:.2f}/"
     savePath = curr_path/f"data_{iname}/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/time_{t[i]:.2f}/"
@@ -186,9 +191,10 @@ def field_save(i,x_old):
     
 def particle_save(i, xprtcl,Z,caus_count):
     
-    print(f"Saving at time {t[i+1]} with Max TrZ : {np.max(np.abs(Z[:,0,0] + Z[:,1,1] ))}")
-    # savePathprtcl = curr_path/f"data_nodadt_{iname}/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/alpha_{alph:.2}_prtcl/St_{st/tf:.2f}/time_{t[i]:.2f}"
-    savePathprtcl = curr_path/f"data_{iname}/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/alpha_{alph:.2}_prtcl/St_{st/tf:.2f}/time_{t[i]:.2f}"
+    print(f"Saving at time {t[i]} with Max TrZ : {np.max(np.abs(Z[:,0,0] + Z[:,1,1] ))}")
+    # savePathprtcl = curr_path/f"data_nodadt_{iname}/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/{alpha_name}/St_{st/tf:.2f}/time_{t[i]:.2f}"
+    alpha_name = "tracer" if alph == 2/3 else f"alpha_{alph:.2}_prtcl"
+    savePathprtcl = curr_path/f"data_{iname}/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/{alpha_name}/St_{st/tf:.2f}/time_{t[i]:.2f}"
     savePathprtcl.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(savePathprtcl/f"pos.npz",pos =  xprtcl[:,:d])
     np.savez_compressed(savePathprtcl/f"vel.npz",vel =  xprtcl[:,d:2*d])
@@ -258,8 +264,8 @@ def calc_phys_fields(psi,u_field,kk):
     delAdelt[...,1,0] = ifft2(1j*kx*tk2*ck2d)
     delAdelt[...,1,1] = ifft2(1j*ky*tk2*ck2d)
     
-    u_field[...,0] = ifft2(1j * ky*psi)
-    u_field[...,1] = ifft2(-1j * kx*psi) 
+    u_field[...,0] = ifft2(1j * ky*psi*ck2d)
+    u_field[...,1] = ifft2(-1j * kx*psi*ck2d) 
     
     return u_field,ugrdu_field,deludelt,A_field,delAdelt,ugrdA_field
 ## -------------- interpolation of any field ---------------------
@@ -353,8 +359,9 @@ def RHSZ(t,Z,A,ugrdA):
 def adv(t,xi,i):
     global psi,dealias
     psi[:] = -lapinv*xi*dealias
-    e_arr[:] = e2d_to_1d(0.5*(xi*np.conjugate(psi))*normalize) #!
-    if np.sum(e_arr)>100: raise ValueError("Blowup")
+    enet = np.sum(0.5*(xi*np.conjugate(psi))*normalize)
+    # e_arr[:] = e2d_to_1d(0.5*(xi*np.conjugate(psi))*normalize) #!
+    if enet>100: raise ValueError("Blowup")
     u_field[...,0] = ifft2(1j * ky*psi)
     u_field[...,1] = ifft2(-1j * kx*psi) 
     xi_xr[:] = ifft2(1j * kx*xi)
@@ -490,7 +497,8 @@ else:
     loadPath = curr_path/f"data_{iname}/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/last/"
     if loadPath.exists() == False: 
         loadPath = curr_path/f"data_spline/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/last/"
-    xi0 = np.load(loadPath/f"w.npy")
+        xi0 = np.load(loadPath/f"w.npy")
+    xi0 = np.load(loadPath/f"w.npz")["vorticity"]
     psi0 = -lapinv*xi0
 
 u_field[...,0] = ifft2(1j * ky*psi0)

@@ -2,12 +2,12 @@ import numpy as np
 from numba import njit
 import matplotlib.pyplot as plt
 import pathlib,sys,os,json
-from scipy.fft import rfft2,irfft2
+from cupyx.scipy.fft import rfft2,irfft2
 from matplotlib.colors import TwoSlopeNorm
 import matplotlib as mpl
 mpl.rc("text", usetex = True)
 import h5py
-
+import cupy as cp
 
 ## ---------------- params ----------------------- ## 
 paramfile = 'parameters.json'
@@ -20,7 +20,7 @@ Re = 1/nu if nu > 0 else np.inf # Reynolds number
 N = Nx = Ny = params["N"] # Grid size
 dt = params["dt"] # Timestep
 # T = params["T"] # Final time
-T = 75.0# Final time
+T = 500# Final time
 einit = params["einit"] # Initial energy
 kinit = params["kinit"] # Initial energy is distributed among these wavenumbers
 linnu = params["linnu"] # Linear drag co-efficient
@@ -55,7 +55,7 @@ PI = np.pi
 TWO_PI = 2*PI
 
 ## It is best to define the function which returns the real part of the iifted function as ifft. 
-ifft2 = lambda x: irfft2(x,(Nx,Ny))
+ifft2 = lambda x,axis = None: irfft2(x,(Nx,Ny),axes = axis)
 
 ## Forming the 2D grid (k space)
 Kx = 2*np.pi*np.linspace(-(Nx//2) , Nx//2 - 0.5*(1+ (-1)**(Nx%2)),Nx)/Lx
@@ -110,10 +110,10 @@ def interp_spline(pos,s_field,smat):
     return smat
 # %%
 curr_path = pathlib.Path(__file__).parent 
-iname = "spline" if order == 4 else "linear"
+iname = "bspline" if order >1 else "linear"
 savePlot = pathlib.Path(f"/home/rajarshi.chattopadhyay/fluid/2DV_and_particles/Plots/iname/Re_{np.round(Re,2)},dt_{dt},N_{N}/")
 savePlot.mkdir(parents=True, exist_ok=True)
-loadPath = pathlib.Path(f"data_nodadt_{iname}/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/")
+loadPath = pathlib.Path(f"data_{iname}/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/")
 prtcl_loadPath = loadPath/f"alpha_{alph:.2}_prtcl/St_{st/tf:.2f}/"
 loadPath.exists()
 # loadPath = pathlib.Path(f"/mnt/pfs/rajarshi.chattopadhyay/Caustics3D/data_new/fluid/omg/alph_0.7000/st_0.00848/dt_8.48e-06")
@@ -187,7 +187,6 @@ tfp = np.zeros(Nprtcl)
 tis = np.array([])
 tfs = np.array([])
 prtcls = np.array([])
-A = np.zeros((d,d,Nx,Ny//2+1),dtype = np.complex128)
 xi = np.zeros((Nx,Ny//2+1),dtype = np.complex128)
 xi_r = np.zeros((Nx,Ny),dtype = np.float64)
 u = np.zeros((Nx,Ny//2+1),dtype = np.complex128)
@@ -220,21 +219,21 @@ for i,t in enumerate(times):
     pos[i] = np.load(prtcl_loadPath/f"time_{t:.2f}/pos.npz")["pos"]
     
     xi[:] = np.load(loadPath/f"time_{t:.2f}/w.npz")["vorticity"]
-    xi_r[:] = ifft2(xi)
+    xi_r[:] = ifft2(cp.array(xi)).get()
     # print(xi_r.max(),np.sqrt(np.mean(xi_r**2)))
     u[:] = 1j* ky*lapinv*xi
     v[:] = -1j*kx*lapinv*xi
     # ur = ifft2(u) 
     # vr = ifft2(v)
-    A = np.zeros((d,d,Nx,Ny//2+1),dtype = np.complex128)
     A[0,0] = 1j*kx*u
     A[0,1] = 1j*ky*u
     A[1,0] = 1j*kx*v
     A[1,1] = 1j*ky*v
     Q_field[:] = 0.0
-    for ii in range(d):
-        for jj in range(d):
-            Ar[ii,jj] = ifft2(A[ii,jj])
+    Ar[:] = ifft2(cp.array(A),axis = (2,3))
+    # for ii in range(d):
+    #     for jj in range(d):
+    #         Ar[ii,jj] = ifft2(cp.array(A[ii,jj])).get()
 
     Q_field[:] = -0.5*np.einsum('ij...,ji...->...',Ar,Ar)
     sig_field[:] = (xi_r**2 - 4*Q_field)**0.5
