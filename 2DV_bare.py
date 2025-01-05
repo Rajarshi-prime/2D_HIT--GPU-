@@ -143,14 +143,14 @@ def forcing(xi,psi):
 def adv(t,xi,i):
     global psi, ur, vr,xi_xr, xi_yr, advterm,dealias,savestep
     psi[:] = -lapinv*xi*dealias
-    e_arr[:] = e2d_to_1d(0.5*(xi*np.conjugate(psi))*normalize) #!
-    if np.sum(e_arr)>100: raise ValueError("Blowup")
+    # e_arr[:] = e2d_to_1d(0.5*(xi*np.conjugate(psi))*normalize) #!
+    # if np.sum(e_arr)>100: raise ValueError("Blowup")
     ur[:] = ifft2(1j * ky*psi)
     vr[:] = ifft2(-1j * kx*psi) 
     xi_xr[:] = ifft2(1j * kx*xi)
     xi_yr[:] = ifft2(1j * ky*xi)
     advterm[:] = ur*xi_xr + vr*xi_yr
-    return -1.0*dealias * (fft.rfft2(advterm)) + forcing(xi,psi)
+    return -1.0*dealias * (fft.rfft2(advterm)) + forcing(xi,psi) - xivis*xi*dealias
 
 
 
@@ -177,7 +177,7 @@ def evolve_and_save(f,t,x0):
         k3[:] = adv(ti + h/2, x_old + h/2*k2,i)
         k4[:] = adv(ti + h, x_old + h*k3,i)
 
-        x_new[:] = (x_old + h/6.0*(k1 + 2*k2 + 2*k3 + k4))/(1.0 + h*xivis)
+        x_new[:] = (x_old + h/6.0*(k1 + 2*k2 + 2*k3 + k4))#/(1.0 + h*xivis)
         ## Things to do every 1 second (dt = 0.1)
         if i%savestep ==0:
             psi[:] = -lapinv*x_old
