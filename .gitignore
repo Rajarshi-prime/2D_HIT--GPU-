@@ -13,3 +13,7 @@ renaming_to_npz.py
 renaming_to_npz.ipynb
 2DV_spline_dimensional.py
 *.pstat
+interp_scaling_naive.txt
+interp_scaling.txt
+running-iteratively-over-alpha.py
+2DV_bare_3_2.py

@@ -244,8 +244,9 @@ e_arr = e2d_to_1d(0.5*(xi0*np.conjugate(psi0))*normalize)
 print(f"Initial energy : {np.sum(e_arr)},(dx/u_max) : {(dx/np.max(np.abs(np.array([ur,vr])))):.4f}")
 ## ----------------------------------------------------
 
-
-
+initial_savePath = pathlib.Path(f"data/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/initial")
+initial_savePath.mkdir(parents=True, exist_ok=True)
+np.savez_compressed(initial_savePath/f"init_fields.npz",xi0 = xi0,e_arr = e_arr)
 
 t1 = time()
 print(f"Initial zeta:{np.max(np.abs(xi0))}")
