@@ -35,19 +35,21 @@ Re = 1/nu if nu > 0 else np.inf # Reynolds number
 N = Nx = Ny = params["N"] # Grid size
 dt = params["dt"] # Timestep
 T = params["T"] # Final time
-# T = 1.0 # Final time
 einit = params["einit"] # Initial energy
 kinit = params["kinit"] # Initial energy is distributed among these wavenumbers
 linnu = params["linnu"] # Linear drag co-efficient
 lp = params["lp"] # Power of the laplacian in the hyperviscous term
 shell_count = params["shell_count"] # The shells where the energy is injected
-alph = params["alph"] # The density ratio
+rho = params["rho"] # The density of the fluid
+alph = 2*rho/ (2*rho + 1) if rho != "inf" else 1 # The density ratio
 Nprtcl = int(params["Nprtcl"]*Nx*Ny) # Number of particles
-tf = params["tf"] # Final time for the particles
-st = params["st"]*tf # Time period for the particles #! Stokes number when non-dimensionalize by simulation time.
+tf = params["tf"] # Kolmogorov timescale for the particles
+st = params["st"]*tf # stokes number in units of the kolmogorov timescale
+"""The this stokes number is a ratio of the size and the koriolis"""
+st = st*rho # the stokes number as per the definition of the 
 tp = st # Save the particle data after this many timesteps #!(in simulation time dimension, this is the tp)
 savestep = int(params["savestep"]/dt) # Save the data after this many timesteps
-save_spectra = int(10//dt) # Save the spectra after this many timesteps
+save_spectra = savestep # Save the spectra after this many timesteps
 prtcl_savestep = int(params["prtcl_savestep"]/dt) # Save the particle data after this many timesteps
 eta = params["eta"]/(Nx//3) # Desired Kolmogorov length scale
 restart = params["restart"] # Restart from the last saved data
@@ -55,7 +57,6 @@ kf = params["kf"] # Forcing wavenumber
 f0 = params["f0"] # Forcing amplitude
 order = params["order"] # Order of the spline interpolation
 Zthresh = params["Zthresh"] # Threshold for the Z matrix
-t = np.arange(0,1.1*dt + T,dt) # Time array
 P = (nu**3/eta**4)/len(shell_count) # power per unit shell
 iname = "bspline" if order > 1 else "linear"
 ## ----------------------------------------------- ##
@@ -107,7 +108,6 @@ print(f"Runnig for alpha = {alph}")
 
 ## -------------- Initializing the zeros arrays -----------------
 psi = np.zeros((Nx,Ny//2 + 1),dtype = np.complex128)
-xi = np.zeros((Nx,Ny//2 + 1),dtype = np.complex128)
 x_old = np.zeros((Nx,Ny//2 + 1),dtype = np.complex128)
 x_new = np.zeros((Nx,Ny//2 + 1),dtype = np.complex128)
 k1 = np.zeros((Nx,Ny//2 + 1),dtype = np.complex128)
@@ -129,7 +129,6 @@ advterm = np.zeros((Nx,Ny),dtype = np.float64)
 factor = np.zeros(Nf)
 factor2d = np.zeros((Nx,Nf))
 
-Nt = len(t)
 xprtcl = np.zeros((Nprtcl,2*d))
 xprtcl_new = np.zeros((Nprtcl,2*d))
 Z = np.zeros((Nprtcl,d,d))
@@ -148,10 +147,7 @@ k2Z = np.zeros((Nprtcl,d,d))
 k3Z = np.zeros((Nprtcl,d,d))
 k4Z = np.zeros((Nprtcl,d,d))
 
-# xindex = np.zeros((Nprtcl))
-# yindex = np.zeros((Nprtcl))
-# xrem = np.zeros((Nprtcl))
-# yrem = np.zeros((Nprtcl))
+
 idx  = np.zeros((Nprtcl,d),dtype = int)
 delx = np.zeros((Nprtcl,d))
 poly = np.zeros((Nprtcl,d,order))
@@ -165,11 +161,8 @@ slx = np.zeros((Nprtcl),dtype = int)
 sly = np.zeros((Nprtcl),dtype = int)
 caus_count = np.zeros((Nprtcl))
 
-term1 = np.zeros((Nx,Ny))
-term2 = np.zeros((Nx,Ny))
-term3 = np.zeros((Nx,Ny))
-term4 = np.zeros((Nx,Ny))
 
+cond = np.zeros((Nprtcl),dtype = bool)
 ## --------------------------------------------------------------
 def e2d_to_1d(x):
     return (np.histogram(k.ravel(),bins = shells,weights=x.ravel() )[0]).real
@@ -180,7 +173,7 @@ def field_save(i,x_old):
     if i%save_spectra == 0:
         print(f"saving e_array")
         e_arr[:] = e2d_to_1d(0.5*(x_old*np.conjugate(psi))*normalize)
-    print(f"Energy at time {np.round(t[i],2)} is {np.sum(e_arr):.4f}",end= '\r')
+    print(f"Energy at time {np.round(t[i],2)} is {np.sum(0.5*(x_old*np.conjugate(psi))*normalize).real:.4f}",end= '\r')
     # savePath = curr_path/f"data_nodadt_{iname}/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/time_{t[i]:.2f}/"
     savePath = curr_path/f"data_{iname}/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/time_{t[i]:.2f}/"
     savePath.mkdir(parents=True, exist_ok=True)
@@ -226,10 +219,9 @@ def forcing(xi,psi):
     return  f
     # return  factor2d*dealias/normalize
 
-index = lambda arg,shift: ((arg + shift )%Nx).astype(int) # Calculating the index
 
 
-def calc_phys_fields(psi,u_field,kk):
+def calc_phys_fields(psi,kk):
     """
     Calculates the physical fields from the streamfunction field.
     However the physical space fields are computed in b-spline basis making them apt for interpolation.
@@ -242,7 +234,10 @@ def calc_phys_fields(psi,u_field,kk):
     A_field[...,1,0] = ifft2(kx* kx*psi)
     A_field[...,1,1] = ifft2(ky* kx*psi)
     
-    ugrdu_field[:] = u_field[...,None,0]*A_field[...,:,0] + u_field[...,None,1]*A_field[...,:,1]
+    u_field[...,0] = ifft2(1j * ky*psi)#! Dk why this is required but it is giving better accurary
+    u_field[...,1] = ifft2(-1j * kx*psi)#! Dk why this is required but it is giving better accurary
+    
+    ugrdu_field[:] = u_field[...,None,0]*A_field[...,0] + u_field[...,None,1]*A_field[...,1]
     
     DuDtk[...,0] = ( -1j*lapinv*ky*(kk ) + fft.rfft2(ugrdu_field[...,0]))*ck2d
     DuDtk[...,1] = ( 1j*lapinv*kx*(kk ) + fft.rfft2(ugrdu_field[...,1]))*ck2d
@@ -269,7 +264,7 @@ def calc_phys_fields(psi,u_field,kk):
 ## -------------- interpolation of any field ---------------------
 
 ## ---------------- pre req for b-spline interps ----------------- ##
-def initialize_b_spline(order):
+def initialize_b_spline(order,X,dx,Nx):
     """
     Initializes the Matrix M and coefficient array ck in 2D according to hinsberg et al.
     ck is not computed using the formula. Rather doing 1/F(b_d) where F is the fourier transform of the b_d function given in (7.6).
@@ -303,30 +298,31 @@ def initialize_b_spline(order):
     ck2d = fft.rfft2(cxy) #! This will be multiplied with all the fields to be interpolated. 
     
     del bm,bk,ck,ckxky,cxy
+    nums = np.arange(order)
     
-    return ck2d,Mmat
-## -------------------------------------------------------------- ##
-nums = np.arange(order)
-
+    return ck2d,Mmat,nums
+    
 def interp_spline(pos,u_field,A_field,DuDt_field,grdDuDt_field):
     """
     b-spline interpolation of the specified order given in Hinsberg et al.
     """
-    global umat,Amat,DuDt_mat,grdDuDt_mat
-    umat[:] = 0.0
-    Amat[:] = 0.0
-    DuDt_mat[:] = 0.0
-    grdDuDt_mat[:] = 0.0
+    global umat,Amat,DuDt_mat,grdDuDt_mat,nums,idx,delx,poly,slx,sly,temparr,order,Mmat,dx,N,Nprtcl
     
-    idx[:] = (pos//dx).astype(int)
+    umat *= 0.0
+    Amat *= 0.0
+    DuDt_mat *= 0.0
+    grdDuDt_mat *= 0.0
+    
+    idx[:] = (pos//dx).astype(np.int32)
     delx[:] = (pos%dx)/dx    
     poly[:] = delx[...,None]**nums
-
+        
+    #! This is the main loop for the interpolation. Try to optimize this loop to make this faster. 
     for i in range(order):
         for j in range(order):
             temparr[:] = np.einsum('p,q,...p,...q->...',Mmat[i],Mmat[j],poly[...,0,:],poly[...,1,:]) #! For saving computations
-            slx[:] = (idx[:,0]-1 + i)%N #! For saving computations
-            sly[:] = (idx[:,1]-1 + j)%N #! For saving computations
+            slx[:] = (idx[:,0]-order/2 + 1 + i)%N #! For saving computations
+            sly[:] = (idx[:,1]-order/2 + 1 + j)%N #! For saving computations
             
             umat  += u_field[slx,sly,...]*temparr[:,None]
             
@@ -337,6 +333,8 @@ def interp_spline(pos,u_field,A_field,DuDt_field,grdDuDt_field):
             grdDuDt_mat  +=  grdDuDt_field[slx,sly]*temparr[:,None,None]
             
     return umat,Amat,DuDt_mat,grdDuDt_mat
+
+## --------------------------------------------------------------
 
 def rel_err(x,y):
     """ Calculates the relative error in velocity. y is the actual velocity """
@@ -349,39 +347,26 @@ def RHSp(t,pos,umat,DuDt_mat):
     return yprtcl
     
 def RHSZ(t,Z,A,grdDuDt_mat):
-    return alph*(A - Z)/tp - Z@Z + 3*(1 - alph)*grdDuDt_mat
-    # return  -A@A + 3*(1 - alph)*grdDuDt_mat
-## ------------------- RHS w/o viscosity --------------------
+    return (alph*(tp*A - Z) - Z@Z)/tp + 3*(1 - alph)*grdDuDt_mat*tp
+
 """psi = str fn ; xi = vorticity"""
 def adv(t,xi,i):
     global psi,dealias
     psi[:] = -lapinv*xi*dealias
-    # enet = np.sum(0.5*(xi*np.conjugate(psi))*normalize)
-    # # e_arr[:] = e2d_to_1d(0.5*(xi*np.conjugate(psi))*normalize) #!
-    # if enet>100: raise ValueError("Blowup")
     u_field[...,0] = ifft2(1j * ky*psi)
     u_field[...,1] = ifft2(-1j * kx*psi) 
     xi_xr[:] = ifft2(1j * kx*xi)
     xi_yr[:] = ifft2(1j * ky*xi)
     advterm[:] = u_field[...,0]*xi_xr + u_field[...,1]*xi_yr
-    return -1.0*dealias * (fft.rfft2(advterm) + forcing(xi,psi) - xivis*xi)
-
-# def conv(t,x,q):
-#     return dq
+    return -1.0*dealias * (fft.rfft2(advterm)) + forcing(xi,psi) - xivis*xi
 
 ## ----------------------------------------------------------
     
-print(np.max(np.abs(xivis)))
 
 ## -------------The RK4 integration function -----------------
 def evolve_and_save(f,t,x0):
-    # count = 0 
-    # err = 0
-    tstart = time()
-    # print()
     h = t[1] - t[0]
     x_old[:] = x0
-    etot = 1.0*np.zeros(len(t)//20) +1
     
     for i,ti in enumerate(t[:-1]):
         # print(np.round(t[i],2),end= '\r')
@@ -394,79 +379,58 @@ def evolve_and_save(f,t,x0):
 
 
         k1[:] = adv(ti,x_old,i)
-        u_field[:],A_field[:],DuDt_field[:],grdDuDt_field[:] = calc_phys_fields(psi,u_field,k1)
+        u_field[:],A_field[:],DuDt_field[:],grdDuDt_field[:] = calc_phys_fields(psi,k1)
                 
         umat[:],Amat[:],DuDt_mat[:],grdDuDt_mat[:] = interp_spline(xprtcl[:,:d],u_field,A_field,DuDt_field,grdDuDt_field)    
-        # count += 1
-        # err += rel_err(Z,Amat)
-        # print(f"Error in k1 vel == umat:" ,rel_err(xprtcl[:,d:2*d],umat))
+        
         # eiga[i] = eigval(Amat.astype(complex),eiga[i])
         # eigz[i] = eigval(np.nan_to_num(Z[i], posinf = 0.0, neginf=0.0).astype(complex) ,eigz[i])
         
         k1p[:] = RHSp(t[i],xprtcl,umat,DuDt_mat)
         k1Z[:] = RHSZ(t[i],Z,Amat,grdDuDt_mat) #! Making the fluid gradient quantities non-dimensional in simulation time.
-        # print(f"Max TrK1Z : {np.max(np.abs(k1Z[:,0,0] + k1Z[:,1,1] ))}")
         
         xtemp[:] = (xprtcl+h*k1p/2)
         xtemp[:,:d] = xtemp[:,:d]%Lx
         
         k2[:] = adv(ti + h/2, x_old + h/2*k1,i)
-        u_field[:],A_field[:],DuDt_field[:],grdDuDt_field[:] = calc_phys_fields(psi,u_field,k2)
+        u_field[:],A_field[:],DuDt_field[:],grdDuDt_field[:] = calc_phys_fields(psi,k2)
         
         umat[:],Amat[:],DuDt_mat[:],grdDuDt_mat[:] = interp_spline(xtemp[:,:d],u_field,A_field,DuDt_field,grdDuDt_field)
-        # count += 1
-        # err += rel_err(Z+ h/2.*k1Z,Amat)
-        # print(f"Error in k2 vel == umat:" ,rel_err(xtemp[:,d:2*d],umat))
-        # print(f"Amat at k2 == Z + h/2*k1Z : {np.allclose(Amat, Z + h/2*k1Z)}")
+
         k2p[:] = RHSp(t[i]+h/2,xtemp,umat,DuDt_mat)
         k2Z[:] = RHSZ(t[i]+ h/2.,Z+ h/2.*k1Z,Amat,grdDuDt_mat) #! Making the fluid gradient quantities non-dimensional in simulation time.
-        # print(f"Max TrK2Z : {np.max(np.abs(k2Z[:,0,0] + k2Z[:,1,1] ))}")
 
         xtemp[:] = (xprtcl+h*k2p/2)
         xtemp[:,:d] = xtemp[:,:d]%Lx
         
         k3[:] = adv(ti + h/2, x_old + h/2*k2,i)
-        u_field[:],A_field[:],DuDt_field[:],grdDuDt_field[:] = calc_phys_fields(psi,u_field,k3)
+        u_field[:],A_field[:],DuDt_field[:],grdDuDt_field[:] = calc_phys_fields(psi,k3)
         
         umat[:],Amat[:],DuDt_mat[:],grdDuDt_mat[:] = interp_spline(xtemp[:,:d],u_field,A_field,DuDt_field,grdDuDt_field)
-        # count += 1
-        # err += rel_err(Z+ h/2.*k2Z,Amat)
-        # print(f"Error in k3 vel == umat:" ,rel_err(xtemp[:,d:2*d],umat))
+        
         k3p[:] = RHSp(t[i]+h/2,xtemp,umat,DuDt_mat)
         k3Z[:] = RHSZ(t[i]+ h/2.,Z+ h/2.*k2Z,Amat,grdDuDt_mat) #! Making the fluid gradient quantities non-dimensional in simulation time.
-        # print(f"Max TrK3Z : {np.max(np.abs(k3Z[:,0,0] + k3Z[:,1,1] ))}")
 
         xtemp[:] = (xprtcl+h*k3p)
         xtemp[:,:d] = xtemp[:,:d]%Lx
         
         k4[:] = adv(ti + h, x_old + h*k3,i)
-        u_field[:],A_field[:],DuDt_field[:],grdDuDt_field[:] = calc_phys_fields(psi,u_field,k4)
+        u_field[:],A_field[:],DuDt_field[:],grdDuDt_field[:] = calc_phys_fields(psi,k4)
                 
         umat[:],Amat[:],DuDt_mat[:],grdDuDt_mat[:] = interp_spline(xtemp[:,:d],u_field,A_field,DuDt_field,grdDuDt_field)
-        # count += 1
-        # err += rel_err(Z+ h*k3Z,Amat)
-        # print(f"Error in k4 vel == umat:" ,rel_err(xtemp[:,d:2*d],umat))
+        
         k4p[:] = RHSp(t[i]+h,xtemp,umat,DuDt_mat)
         k4Z[:] = RHSZ(t[i]+ h,Z+ h*k3Z,Amat,grdDuDt_mat) #! Making the fluid gradient quantities non-dimensional in simulation time.
-        # print(f"Max TrK4Z : {np.max(np.abs(k4Z[:,0,0] + k4Z[:,1,1] ))}")
 
         x_new[:] = (x_old + h/6.0*(k1 + 2*k2 + 2*k3 + k4))#/(1.0 + h*xivis)
         xprtcl_new[:] = xprtcl + h*(k1p + 2*k2p + 2*k3p + k4p)/6    
         xprtcl_new[:,:d] = xprtcl_new[:,:d]%Lx
         Z_new[:] = Z + h/6.*(k1Z+ 2*k2Z + 2*k3Z + k4Z)
-        cond = np.argwhere(np.einsum('...ii->...',Z_new)< Zthresh*tp)
+        
+        cond[:] = np.einsum('...ii->...',Z_new)< Zthresh
         caus_count[cond] += 1
-        Z_new[cond] = -1*Z_new[cond]
+        Z_new[cond] *= -1.0            
 
-        # if count > 100 : 
-        #     tend = time()
-        #     print(count, err,tend - tstart )
-        #     raise SystemExit
-        
-        
-            
-            
-            
             
         x_old[:] = x_new
         psi[:] = -lapinv*x_old
@@ -508,31 +472,58 @@ if restart == False:
 
     xi0[:] = xi0*(einit/e0)**0.5
     psi0[:] = psi0*(einit/e0)**0.5
+    tstart = 0.0
 else:
+    t_restart = np.nan
     """Starts from the last saved data"""
-    loadPath = curr_path/f"data_{iname}/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/last/"
+    loadPath = curr_path/f"data_{iname}/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/time_{t_restart:.2f}/"
     if loadPath.exists() == False: 
-        dt_load = 0.01
+        dt_load = 0.005
         loadPath = curr_path/f"data/Re_{np.round(Re,2)},dt_{dt_load},N_{Nx}/last/"
+        print(f"Loading from {loadPath}")
         xi0 = np.load(loadPath/f"w.npy")
+        t_restart = 0.0
+
     else: xi0 = np.load(loadPath/f"w.npz")["vorticity"]
     psi0 = -lapinv*xi0
+    tstart = t_restart
+    print(f"Initial Energy : {np.sum(e2d_to_1d(0.5*(xi0*np.conjugate(psi0))*normalize))}")
 
 u_field[...,0] = ifft2(1j * ky*psi0)
 u_field[...,1] = ifft2(-1j * kx*psi0) 
+
 e_arr = e2d_to_1d(0.5*(xi0*np.conjugate(psi0))*normalize)
 e0 = np.sum(e_arr)
+
 ek_arr0= 0*e_arr.copy()
 ek_arr0[shell_count] = e_arr[shell_count]
-print(f"Initial energy : {np.sum(e_arr)}")
-print(f"max dt allowed :{dx/np.max(np.abs(u_field))}")
 
-xprtcl[:,:d] = np.random.uniform(0,Lx,(Nprtcl,d))
-ck2d,Mmat = initialize_b_spline(order)
-u_field[:],A_field[:],DuDt_field[:],grdDuDt_field[:] = calc_phys_fields(psi0,u_field,0.0*k1) #! Initialized for interpolation
-umat[:],Amat[:],DuDt_mat[:],grdDuDt_mat[:] = interp_spline(xprtcl[:,:d],u_field,A_field,DuDt_field,grdDuDt_field)
-xprtcl[:,d:2*d] = umat.copy()
-Z[:] = Amat.copy()
+ck2d,Mmat,nums = initialize_b_spline(order,X,dx,Nx  )
+
+if t_restart > 0.0:
+    try:
+        loadPath = curr_path/f"data_{iname}/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/alpha_{alph}_prtcl/St_{st/tf:.2f}/time_{t_restart:.2f}"
+        xprtcl[:,:d] = np.load(loadPath/f"pos.npz")["pos"]
+        xprtcl[:,d:2*d] = np.load(loadPath/f"vel.npz")["vel"]
+        caus_count[:] = np.load(loadPath/f"caus_count.npz")["caustics_count"]
+        Z[:] = np.load(loadPath/f"prtcl_Z.npz")["Zmatrix"]
+        print(f"max and min of intiial Z is: {np.max(Z[:,0,0] + Z[:,1,1] )} and {np.min(Z[:,0,0] + Z[:,1,1] )}")
+    except: 
+        raise SystemExit("No particle data found")
+
+else:
+    xprtcl[:,:d] = np.random.uniform(0,Lx,(Nprtcl,d))
+    t0 = time()
+    u_field[:],A_field[:],DuDt_field[:],grdDuDt_field[:] = calc_phys_fields(psi0,0.0*k1) #! Initialized for interpolation
+    umat[:],Amat[:],DuDt_mat[:],grdDuDt_mat[:] = interp_spline(xprtcl[:,:d],u_field,A_field,DuDt_field,grdDuDt_field)
+    t1 = time()
+    print(f"Time taken for initial interpolation : {t1-t0}")
+    print(f"Initial energy : {np.sum(e_arr)}")
+    xprtcl[:,d:2*d] = umat.copy()
+    Z[:] = Amat.copy()*tp
+
+
+print(f"max dt allowed :{dx/np.max(np.abs(u_field))}")
 Amat_Start = Amat.copy()
 A_field_start = A_field.copy()
 
@@ -543,6 +534,8 @@ A_field_start = A_field.copy()
 
 t1 = time()
 print(f"Initial zeta:{np.max(np.abs(xi0))}")
+t = np.arange(tstart,1.1*dt + T,dt) # Time array
+
 etot = evolve_and_save(adv,t,xi0)
 t2 = time()
 print(f"Time taken to evolve for {T} secs in {dt} sec timesteps with gridsize {Nx}x{Nx} is \n {t2-t1} sec")
