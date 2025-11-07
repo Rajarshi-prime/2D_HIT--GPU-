@@ -38,6 +38,7 @@ alphs = [0.70,0.72,0.75,0.77,0.80,0.85,0.90,1.00]
 # alph = params["alpha"] # The density ratio
 alph = alphs[alph_idx] # The density ratio
 Nprtcl = int(params["Nprtcl"]*Nx*Ny) # Number of particles
+if alph == 0.7: Nprtcl = int(Nx*Ny)
 tf = params["tf"] # Final time for the particles
 sts = [0.2,0.3,0.4,0.47]
 # st = params["st"]*tf # Time period for the particles
@@ -209,7 +210,12 @@ if st_old == 0.3*tf:
 else: 
     loadPath = curr_path/f"brenner/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/"
     
-prtcl_loadPath = loadPath/f"alpha_{alph:.2f}_prtcl/St_{(st_old/tf):.2f}/"
+if alph ==0.7:
+    loadPath = curr_path/f"brenner/Re_{np.round(Re,2)},dt_{dt},N_{Nx}/"
+    prtcl_loadPath = loadPath/f"alpha_{alph:.2f}_prtcl/mp/St_{(st_old/tf):.2f}/"
+    
+
+else: prtcl_loadPath = loadPath/f"alpha_{alph:.2f}_prtcl/St_{(st_old/tf):.2f}/"
 print(f" Found loadpath {loadPath.exists()}")
 print(f" Found particle loadpath {prtcl_loadPath.exists()}")
 
@@ -267,6 +273,7 @@ Q_field_pdf = np.zeros((Ntimes,len(Qbins)-1))
 Q_particle_pdf = np.zeros((Ntimes,len(Qbins)-1))
 Q_caus_pdf = np.zeros((Ntimes,len(Qbins)-1))
 xi = np.zeros((Nx,Ny//2+1),dtype = np.complex128)
+psi = np.zeros((Nx,Ny//2+1),dtype = np.complex128)
 A = np.zeros((Nx,Ny//2+1,d,d),dtype = np.complex128)
 u = xi.copy()
 v = xi.copy()
@@ -306,20 +313,20 @@ tfs = np.array([])
 glob_min_Q = 0.0
 
 
-
+randidx = np.random.randint(0, 2097152,size = Nprtcl)
 
 #%%
 
-final_caus_count = np.load(prtcl_loadPath/f"time_{times[-1]:.2f}/caus_count.npz")["caustics_count"]
+final_caus_count = np.load(prtcl_loadPath/f"time_{times[-1]:.2f}/caus_count.npz")["caustics_count"][randidx]
 t1 = t2 = 0.0
 for i,t in tqdm(enumerate(times)):
     t1 = time.time()
     # print(f"loading time {t} in time {t2 - t1 sec}",end='\r')
-    Z[:] =  np.load(prtcl_loadPath/f"time_{t:.2f}/prtcl_Z.npz")["Zmatrix"]
+    Z[:] =  np.load(prtcl_loadPath/f"time_{t:.2f}/prtcl_Z.npz")["Zmatrix"][randidx]
     # Z[:] =  np.load(prtcl_loadPath/f"time_{t:.2f}/prtcl_Z.npy")
     TrZ[i] = np.einsum('...ii->...', Z)
     TrZ2[i] = np.einsum('...ij,...ji->...', Z,Z)
-    caus_count[i] =  np.round(np.load(prtcl_loadPath/f"time_{t:.2f}/caus_count.npz")["caustics_count"]).astype(np.int32)
+    caus_count[i] =  np.round(np.load(prtcl_loadPath/f"time_{t:.2f}/caus_count.npz")["caustics_count"][randidx]).astype(np.int32)
 
 
 
@@ -334,15 +341,16 @@ for i,t in tqdm(enumerate(times)):
         tip[newcaus_idx] = t
 
 
-    vel[i] = np.load(prtcl_loadPath/f"time_{t:.2f}/vel.npz")["vel"]
-    pos[i] = np.load(prtcl_loadPath/f"time_{t:.2f}/pos.npz")["pos"]
+    vel[i] = np.load(prtcl_loadPath/f"time_{t:.2f}/vel.npz")["vel"][randidx]
+    pos[i] = np.load(prtcl_loadPath/f"time_{t:.2f}/pos.npz")["pos"][randidx]
     
     xi[:] = np.load(loadPath/f"time_{t:.2f}/w.npz")["vorticity"]
     
     xi_r[:] = ifft2(xi)
     # print(xi_r.max(),np.sqrt(np.mean(xi_r**2)))
-    u[:] = 1j* ky*lapinv*xi
-    v[:] = -1j*kx*lapinv*xi
+    psi[:] = -lapinv*xi
+    u[:] = 1j * ky*psi
+    v[:] = -1j * kx*psi
     
     A[...,0,0] = 1j*kx*u
     A[...,0,1] = 1j*ky*u

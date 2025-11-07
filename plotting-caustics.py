@@ -111,7 +111,8 @@ def prtcl_loadPath(alpha,st,Re=Re,dt = dt, N =N):
     return loadPath(Re,st,dt,N)/f"alpha_{alpha:.2f}_prtcl/St_{st:.2f}/"
 
 # %%
-alpha_values = np.array([0.70,0.72,0.75,0.77,0.8,0.85,0.9,1.0])
+# alpha_values = np.array([0.70,0.72,0.75,0.77,0.8,0.85,0.9,1.0])
+alpha_values = np.array([0.70,0.72,0.75,0.77,0.85,0.9,1.0])
 # alpha_values = np.array([0.72,1.0])
 
 # %%
@@ -228,7 +229,7 @@ ax.set_ylim(1e-2,None)
 plt.tight_layout()
 # plt.save_pgf(fig,str(savePlot/f"Q_pdf_wo_caustics"),bbox_inches='tight', pad_inches=0.0)
 # plt.savefig(savePlot/f"Q_pdf_wo_caustics.pgf", bbox_inches='tight', pad_inches=0.0,format = 'pgf')
-plt.savefig(savePlot/f"Q_pdf_wo_caustics.pdf", bbox_inches='tight', pad_inches=0.0,format = 'pdf')
+# plt.savefig(savePlot/f"Q_pdf_wo_caustics.pdf", bbox_inches='tight', pad_inches=0.0,format = 'pdf')
 # plt.savefig(savePlot/f"Q_pdf_wo_caustics.png", bbox_inches='tight', pad_inches=0.0,format = 'png')
 times[-1]
 
@@ -444,7 +445,7 @@ t_mins = []
 Q_mins = []
 lentimes = []
 lentimes_nc = []
-for qq,st in enumerate([0.3]):
+for qq,st in enumerate([0.3,0.4]):
     # if qq==0: continue
     print(f"Loading st = {st}")
     for iiii,alph in enumerate(alpha_values):

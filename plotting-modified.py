@@ -7,7 +7,7 @@ from matplotlib.colors import TwoSlopeNorm
 import matplotlib as mpl
 mpl.rc("text", usetex = True)
 
-
+#%%
 paramfile = '/home/rajarshi.chattopadhyay/fluid/2DV_and_particles/parameters.json'
 with open(paramfile,'r') as jsonFile: params = json.load(jsonFile)
 
@@ -32,7 +32,7 @@ loadPath = pathlib.Path(f"/home/rajarshi.chattopadhyay/fluid/2DV_and_particles/d
 loadPath.exists()
 
 
-
+#%%
 Lx, Ly = (2*np.pi),(2*np.pi) #Length of the grid
 X,Y = np.linspace(0,Lx,Nx,endpoint= False), np.linspace(0,Ly,Ny,endpoint= False)
 dx = X[1] - X[0]
@@ -56,7 +56,7 @@ lap = -(kx**2 + ky**2)
 # lap1[lap1== 0] = np.inf
 lapinv = 1.0/np.where(lap == 0., np.inf, lap)
 kx.shape
-
+#%%
 poly = np.zeros((Nprtcl,d,order),dtype = np.float64)
 Mmat = np.array([
     [0,-7/15,4/5,-1/3],
@@ -85,7 +85,7 @@ def interp_spline(pos,u_field,A_field,deludelt,DADt):
 
 
 
-
+#%%
 
 savedir = savePlot/"4movies"
 savedir.mkdir(parents=True, exist_ok=True)
@@ -113,14 +113,13 @@ for t in np.arange(0,150.1,1):
     for ii in range(4):
     # alph = 0.66666666666666667
         alph = alphs[ii]
-        pos= np.load(loadPath/f"alpha_{alph:.2}_prtcl/St_{st}/time_{t:.2f}/pos.npy")
-        vel= np.load(loadPath/f"alpha_{alph:.2}_prtcl/St_{st}/time_{t:.2f}/vel.npy")
-        # TrZ = np.einsum('...ii->...',np.load(loadPath/f"alpha_{alph:.2}_prtcl/St_{st}/time_{t:.2f}/prtcl_Z.npy"))
-        caus_count = np.load(loadPath/f"alpha_{alph:.2}_prtcl/St_{st}/time_{t:.2f}/caus_count.npy")
+        pos= np.load(loadPath(Re,st = st)/f"alpha_{alph:.2f}_prtcl/St_{st:.2f}/time_{t:.2f}/pos.npz")["pos"]
+        caus_count = np.load(loadPath(Re,st = st)/f"alpha_{alph:.2f}_prtcl/St_{st:.2f}/time_{t:.2f}/caus_count.npz")['caustics_count']
         # print(TrZ.shape,Nprtcl*N**2)
         causidx = np.argwhere(caus_count>0)
         # print((caus_count>0).sum()/len(caus_count))
         if t%5 < 0.01:
+            xi_last = np.load(loadPath(Re,st = st)/f"time_{t:.2f}/w.npz")["vorticity"]
             xi_last = np.load(loadPath/f"time_{t:.2f}/w.npy")
             # print(xi_last.shape,lapinv.shape)
             # psi[:] = -xi_last*lapinv
@@ -169,7 +168,7 @@ for t in np.arange(0,150.1,1):
         plt.title(fr"({labels[ii]}) $\alpha={alph}$ ",fontsize = 15)
         
     plt.tight_layout()
-    plt.savefig(savedir/f"caustics_time_{t:.2f}.png",dpi = 100)
-    # plt.show()
+    # plt.savefig(savedir/f"caustics_time_{t:.2f}.png",dpi = 100)
+    plt.show()
     plt.close()
-         
+#%%

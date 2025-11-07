@@ -1,2 +1,5 @@
 outfiles/*
 .ipynb_checkpoints/*
+jupyter.sh
+
+postproc_new_new.py

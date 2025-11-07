@@ -300,8 +300,8 @@ for i,t in enumerate(times):
         causQmean[i] = np.mean(Qinterp[i,causidx])
         causQstd[i] = np.std(Qinterp[i,causidx])
         Q_caus_pdf[i,:] = np.histogram(Qinterp[i,causidx],bins = Qbins)[0]/np.sum(caus_count[i] > 0)
-    # Omean[i] = np.mean(Qinterp)
-    # Qstd[i] = np.std(Qinterp)
+    Omean[i] = np.mean(Qinterp)
+    Qstd[i] = np.std(Qinterp)
 # print(Qinterp)
 # Q_caus = Qinterp[:,caus_count[-1] > 0]
 
@@ -317,36 +317,17 @@ t_caus_len = np.zeros(int(np.sum(caus_count[-1])))
 Q_initial = np.zeros(int(np.sum(caus_count[-1])))
 omg_initial = np.zeros(int(np.sum(caus_count[-1])))
 
-# if (prtcl_loadPath/f"caus-details.hdf5").exists():
-#     os.remove(prtcl_loadPath/f"caus-details.hdf5")
-
-# with h5py.File(prtcl_loadPath/f"caus-details.hdf5",'w') as f:
-#     # try:
-#     caus_ratio = f.create_dataset("Caustics_ratio",data = (np.sum(caus_count>0,axis = 1)/Nprtcl),dtype = np.float64)
-#     times = f.create_dataset("times",data = times,dtype = np.float64)
-#     caus_new = np.sum(caus_count>0,axis = 1)/Nprtcl -np.roll(np.sum(caus_count>0,axis = 1)/Nprtcl ,1)
-#     caus_new[0] = 0
-#     newcaus = f.create_dataset("new_caus",data =  caus_new,dtype = np.float64)
-#     caus_same = np.sum((caus_count >1)*(caus_count > np.roll(caus_count,1,axis = 0)),axis = 1)/Nprtcl
-#     caus_same[0] = 0
-#     samecaus = f.create_dataset("same_caus",data = caus_same,dtype = np.float64)
+with h5py.File(prtcl_loadPath/f"caus-details.hdf5",'r+') as f:
+    # try:
+    caus_ratio = f.create_dataset("Caustics_ratio",data = (np.sum(caus_count>0,axis = 1)/Nprtcl),dtype = np.float64)
+    times = f.create_dataset("times",data = times,dtype = np.float64)
     
-#     meanQ = np.mean(Qinterp,axis = 1)
-#     print(meanQ)
-#     stdQ = np.std(Qinterp,axis = 1)
-#     print(np.min(stdQ),np.max(stdQ))
-#     Qmean = f.create_dataset("Qmean",data = meanQ,dtype = np.float64)
-#     Qstd = f.create_dataset("Qstd",data = stdQ,dtype = np.float64)
-
-#     causQmean = f.create_dataset("causQmean",data = causQmean,dtype = np.float64)
-#     causQstd = f.create_dataset("causQstd",data = causQstd,dtype = np.float64)
+    Q_field_pdf = f.create_dataset("Q_field_pdf",data = Q_field_pdf,dtype = np.float64)
+    Q_particle_pdf = f.create_dataset("Q_particle_pdf",data = Q_particle_pdf,dtype = np.float64)
+    Q_caus_pdf = f.create_dataset("Q_caus_pdf",data = Q_caus_pdf,dtype = np.float64)
     
-#     Q_field_pdf = f.create_dataset("Q_field_pdf",data = Q_field_pdf,dtype = np.float64)
-#     Q_particle_pdf = f.create_dataset("Q_particle_pdf",data = Q_particle_pdf,dtype = np.float64)
-#     Q_caus_pdf = f.create_dataset("Q_caus_pdf",data = Q_caus_pdf,dtype = np.float64)
-
-# del caus_ratio,caus_new, caus_same,causQmean,causQstd,Qmean,Qstd,Q_field_pdf,Q_particle_pdf,Q_caus_pdf
-# del causQmean,causQstd,Qmean,Qstd,Q_field_pdf,Q_particle_pdf,Q_caus_pdf
+del Q_field_pdf,Q_particle_pdf,Q_caus_pdf
+del causQmean,causQstd,Qmean,Qstd,Q_field_pdf,Q_particle_pdf,Q_caus_pdf
 
 causidx = np.argwhere(caus_count[-1] > 0)
 # print(causidx)
